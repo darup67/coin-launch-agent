@@ -151,7 +151,17 @@ list adds no survivorship bias.
 ~/.venvs/market-ml/bin/python score.py --print    # one scoring tick, printed
 ```
 
-The first results are in [`results/report.md`](results/report.md). Coverage is
+**First results (2026-09-23, 421 coins, test = the newest 84):** the model ranks
+well. AUC is 0.85, and each tick's top pick held 2× 14.5% of the time against a
+3.2% base rate. But you don't get paid for ranking: the top pick's 60-minute end
+multiple was a **median 0.63×** and a mean 1.27×, and at the gate a median 0.40×
+and a mean 1.07×, before fees. A few big winners carry the average; most picks
+still fall. **Chronos-2 added nothing** over AutoGluon without it (AUC 0.850 vs
+0.850), and on its own Chronos was no better than momentum. The first target,
+"touches 2× within the hour", was dropped: its picks ended at a median 0.03×,
+spike then rug. **Pick emails stay off** until a nightly retrain shows held-out
+picks at the gate with a median end multiple of at least 1.0×. Until then the
+model only ranks on the board. Full numbers are in [`results/report.md`](results/report.md). Coverage is
 pump.fun coins only; Base coins and other Solana launchpads still get the
 threshold alerts but no score. Training history is cached in `data/pump/`, which
 is not committed. It is the one thing this repo keeps on disk, because a model

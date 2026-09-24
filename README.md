@@ -2,23 +2,23 @@
 
 Watches brand-new coins on **Solana** and **Base**, the two chains the Coinbase
 app trades onchain. It fires a banner and a sound when a coin that **launched or
-graduated** in the last **4 hours** reaches **$50k market cap**. It also flags new
+graduated** in the last **4 hours** reaches **$150k market cap**. It also flags new
 Coinbase Exchange listings.
 
 Read-only: it never trades, holds no keys, and records nothing except a dedupe
 list and the current board.
 
 ```
-New coins ≤4h old · threshold $50.0k · watcher, updated 4s ago
+New coins ≤4h old · threshold $150.0k · watcher, updated 4s ago
 
-🚀 SSM6900       $174.4k mc      2m old  graduated    liq  $37.2k    891 buys/1h  solana  9mKDte…
-🚀 DogWifTipped  $234.3k mc     17m old  new pool     liq  $21.1k    132 buys/1h  base    0x47ad…
-✗  Groyper       $121.0k mc      2m old  new pool     liq  $15.2k     14 buys/1h  base    0xfe78…   ← 14 buys/1h
-✗  CZBUILDER      $79.9k mc      4m old  graduated    liq   $3.0k    655 buys/1h  solana  2E7oLA…   ← liquidity $3.0k
-   Steam          $47.8k mc      2m old  graduated    liq  $18.7k    725 buys/1h  solana  EDjqYQ…
+🚀 GS            $360.1k mc      9m old  graduated    liq  $47.9k   2204/1295  b/s 1h  solana  2jPe4j…
+🚀 BITSHARK      $224.1k mc     11m old  new pool     liq  $20.6k    106/71    b/s 1h  base    0x0109…
+✗  NASA          $168.0k mc      9m old  graduated    liq  $41.1k   3526/11    b/s 1h  solana  6TsQW9…   ← honeypot? 11 sells vs 3526 buys
+✗  familiars     $10.05M mc     26m old  new pool     liq  $1.71M     62/6     b/s 1h  base    0xc596…   ← 62 buys/1h
+   up            $133.1k mc     12m old  graduated    liq  $20.7k   1604/56    b/s 1h  solana  87MhoU…
 ```
 
-A banner looks like `🚀 SSM6900 $174.4k in 2m · graduated · SOL`. This Mac hides
+A banner looks like `🚀 GS $360.1k in 9m · graduated · SOL`. This Mac hides
 notification bodies, so everything that matters is in the title. Each hit also
 lands in `agent.out.log` with the full token address.
 
@@ -48,7 +48,7 @@ stopped firing on this Mac in Sep 2026. Rebuild the banner applet with
 ## Where "launched" and "graduated" come from
 
 Coinbase's API has no feed for new tokens. Its Advanced Trade and Exchange APIs
-only list centrally listed products, and those arrive far above $50k. The
+only list centrally listed products, and those arrive far above these caps. The
 Coinbase app trades new Solana and Base tokens through DEX aggregators, so this
 feed has to be onchain. Two free APIs, no keys:
 
@@ -82,6 +82,7 @@ caps that make up much of the raw list:
 | `min_liquidity_usd` | 8000 | a $100k "cap" on $3k of liquidity is one wallet |
 | `max_mc_to_liquidity` | 100 | catches the $2B caps on $0 of liquidity that are common on Base |
 | `min_buys_h1` | 100 | buy txns across all pools in the last hour; bundled launches show 1–30 |
+| `min_sell_ratio` | 0.10 | honeypot check: 1h sells must be ≥10% of buys. Organic graduations ran 0.13–0.73; a suspected honeypot showed 3,526 buys to 11 sells |
 | `max_alerts_per_hour` | 20 | anything past the cap is logged as `muted` |
 
 Set a filter to 0 to turn it off. A held-back token can still alert later if it
@@ -103,8 +104,9 @@ cached for 60s, so a hit can land 1–2 min after the cross.
 tracked, about 64 API calls/min, **19 hits**, and 87 held back. With SOL around
 $115, a pump.fun coin graduates at about $50k, so a $50k threshold fires on
 nearly every graduation that gets real buying: roughly 100 an hour. The hourly
-cap keeps banners to 20. To hear only the exceptional ones, raise `min_mc_usd`
-(for example to $150k–250k) or `min_buys_h1`.
+cap keeps banners to 20. **On 2026-09-23 the threshold was raised to $150k** and
+the honeypot filter was added. To make it stricter again, raise `min_mc_usd` or
+`min_buys_h1`.
 
 ## Not advice
 

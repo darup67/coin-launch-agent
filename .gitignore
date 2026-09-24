@@ -2,3 +2,5 @@ __pycache__/
 *.log
 CoinLaunchAlert.app/
 data/
+models/*
+!models/meta.json

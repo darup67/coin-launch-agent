@@ -1,0 +1,82 @@
+{
+  "trained": "2026-09-24T03:57:14.183797+00:00",
+  "label": "hold2x",
+  "features": [
+    "age_min",
+    "log_mc",
+    "ret_5m",
+    "ret_15m",
+    "ret_30m",
+    "ret_60m",
+    "ret_since_launch",
+    "drawdown",
+    "bars_since_ath",
+    "log_ath",
+    "log_vol_5m",
+    "log_vol_15m",
+    "log_vol_60m",
+    "vol_accel",
+    "active_30m",
+    "rv_30m",
+    "up_frac_30m",
+    "max_bar_jump",
+    "log_first_close",
+    "bars_to_75k",
+    "hour_utc",
+    "chr_q50_15m",
+    "chr_q10_60m",
+    "chr_q50_60m",
+    "chr_q90_60m",
+    "chr_q50_max",
+    "chr_q90_max",
+    "chr_spread_60m"
+  ],
+  "gate": 0.08,
+  "gate_test": {
+    "n": 81,
+    "hit": 0.1111111111111111,
+    "median_end_mult": 0.40316355446153035,
+    "mean_end_mult": 1.0740611930368016
+  },
+  "metrics_test": {
+    "AutoGluon + Chronos-2": {
+      "auc": 0.8497,
+      "top1": 0.1446,
+      "top3": 0.1055,
+      "tick_base": 0.0323,
+      "top1_end_median": 0.6268,
+      "top1_end_mean": 1.2725
+    },
+    "AutoGluon, no Chronos": {
+      "auc": 0.8497,
+      "top1": 0.1566,
+      "top3": 0.1055,
+      "tick_base": 0.0323,
+      "top1_end_median": 0.6268,
+      "top1_end_mean": 1.3344
+    },
+    "Chronos-2 alone (q90 best)": {
+      "auc": 0.7966,
+      "top1": 0.0361,
+      "top3": 0.0549,
+      "tick_base": 0.0323,
+      "top1_end_median": 0.0475,
+      "top1_end_mean": 0.6021
+    },
+    "15-min momentum": {
+      "auc": 0.7905,
+      "top1": 0.0,
+      "top3": 0.0295,
+      "tick_base": 0.0323,
+      "top1_end_median": 0.9194,
+      "top1_end_mean": 0.7098
+    }
+  },
+  "base_rate_test": 0.03220338983050847,
+  "coins": 421,
+  "rows": 5026,
+  "min_mc": 75000,
+  "max_age_min": 240,
+  "horizon_min": 60,
+  "mult": 2.0
+}

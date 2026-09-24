@@ -29,5 +29,7 @@
     "speak": false,
     "email": false
   },
-  "coinbase_listing_email": true
+  "coinbase_listing_email": true,
+  "ml_picks_email": true,
+  "_ml_picks_email_comment": "score.py emails model picks (P >= the gate train.py set on validation, passing the watcher's filters), each coin at most once per 2h. There is no gate, and so no email, if validation found none."
 }

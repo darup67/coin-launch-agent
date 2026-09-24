@@ -176,8 +176,9 @@ class Watcher:
             age = now - (t["launch"] or t["first_seen"])
             mc = (t["snap"] or {}).get("mc") or t.get("gt_mc") or 0
             tracked = now - t["first_seen"]
-            dead = (tracked > 900 and mc < 0.15 * c["min_mc_usd"] and mc < 2 * (t["first_mc"] or 0)) \
-                or (tracked > 3600 and mc < 0.3 * c["min_mc_usd"])
+            # Fixed dollars, not a share of the threshold: a higher threshold shouldn't drop slow starters.
+            dead = (tracked > 900 and mc < 7500 and mc < 2 * (t["first_mc"] or 0)) \
+                or (tracked > 3600 and mc < 15000)
             if age > c["max_age_hours"] * 3600 or dead or key in self.alerted:
                 del self.tokens[key]
         self.alerted = {k: v for k, v in self.alerted.items() if now - v < 86400}
@@ -199,6 +200,9 @@ class Watcher:
             why.append(f"cap/liquidity {s['mc'] / s['liq']:.0f}x")
         if s["buys"] < c["min_buys_h1"]:
             why.append(f"{s['buys']} buys/1h")
+        elif s["sells"] < c.get("min_sell_ratio", 0) * s["buys"]:
+            # Thousands of buys and almost no sells: holders likely can't sell (honeypot).
+            why.append(f"honeypot? {s['sells']} sells vs {s['buys']} buys")
         if why:
             if why != t["why"] and self.verbose:
                 log(f"hold {t['symbol']} {money(s['mc'])} {dur(age)} old ({', '.join(why)})")
@@ -286,7 +290,7 @@ class Watcher:
 
 def card_line(h):
     return (f"{h['symbol'][:12]:<12} {money(h['mc']):>8} mc  {dur(h['age']):>6} old  {h['stage']:<12} "
-            f"liq {money(h['liq']):>7}  {h['buys']:>5} buys/1h  {h['net']:<6}  {h['token']}")
+            f"liq {money(h['liq']):>7}  {h['buys']:>5}/{h['sells']:<5} b/s 1h  {h['net']:<6}  {h['token']}")
 
 
 def notify(title, body, cfg, speak="", detail=""):

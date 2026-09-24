@@ -18,9 +18,20 @@ New coins ≤4h old · threshold $150.0k · watcher, updated 4s ago
    up            $133.1k mc     12m old  graduated    liq  $20.7k   1604/56    b/s 1h  solana  87MhoU…
 ```
 
-A banner looks like `🚀 GS $360.1k in 9m · graduated · SOL`. This Mac hides
-notification bodies, so everything that matters is in the title. Each hit also
-lands in `agent.out.log` with the full token address.
+Each hit opens a small alert window that closes itself after 30s, such as
+`🚀 GS $360.1k in 9m · graduated · SOL`, and plays the Submarine sound. The
+window replaced macOS banners because the banner applet never registered as a
+notification sender on this Mac. The banner channel is still in `config.json`
+in case notifications are allowed later. Each hit also lands in `agent.out.log`
+with the full token address.
+
+**Digest email:** every 20 hits (muted ones included) go out as one email to
+darup67@gmail.com through `~/flip-notifier/send-email.js`, with the Keychain app
+password flip-notifier uses. Each coin lists its cap at the alert, its cap now,
+the contract address to paste into the Coinbase app, and a DexScreener link.
+The queue is kept in `data/state.json`, so a restart doesn't lose it. Set
+`email_digest.every` to change the batch size; `--test-digest` sends what's
+queued right away.
 
 ## Commands
 

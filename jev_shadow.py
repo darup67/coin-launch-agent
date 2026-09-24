@@ -146,6 +146,20 @@ def outcomes(w, per_cycle=5, reserve=20):
             _pending.pop(r["key"], None)
 
 
+def digest_line(key):
+    """Jev's read of one coin as a short line for the digest email, or "" if it hasn't answered."""
+    rec = None
+    for r in _read(JUDGED):
+        if r["key"] == key:
+            rec = r
+    if not rec:
+        return ""
+    a = rec["answers"]
+    concept = ("none", "generic", "clear")[min(2, max(0, round(a["concept"]["score"])))]
+    return (f"Jev: impersonation {a['impersonation']['noul']:.0%} · concept {concept} · "
+            f"scam language {a['scam_language']['noul']:.0%}")
+
+
 def report():
     out = {o["key"]: o for o in _read(OUTCOMES)}
     rows = [(r, out[r["key"]]) for r in _read(JUDGED) if r["key"] in out and out[r["key"]]["ratio"] is not None]

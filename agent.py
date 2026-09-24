@@ -221,8 +221,8 @@ class Watcher:
         if self.seeding:
             log(f"already over at first start (no banner) {line}")
             return
+        jev_shadow.judge(h)   # first, so its answer is usually back before a digest goes out
         self.add_to_digest(h)
-        jev_shadow.judge(h)   # shadow: logs Jev's read of the coin, changes nothing here
         while self.alert_times and time.time() - self.alert_times[0] > 3600:
             self.alert_times.popleft()
         if len(self.alert_times) >= self.cfg["max_alerts_per_hour"]:
@@ -366,6 +366,10 @@ def send_email(subject, body):
         return False
 
 
+def cfg_jev_in_digest():
+    return load(os.path.join(HERE, "config.json"), {}).get("jev_in_digest", False)
+
+
 def send_digest(hits):
     """One email for a batch of hits, each with its market cap now, re-read from DexScreener."""
     lines = []
@@ -380,20 +384,25 @@ def send_digest(hits):
             pass
         chg = f" ({(now_mc / h['mc'] - 1) * 100:+.0f}%)" if now_mc and h["mc"] else ""
         chain = "Solana" if h["net"] == "solana" else h["net"].capitalize()
+        jl = jev_shadow.digest_line(f"{h['net']}:{h['token']}") if cfg_jev_in_digest() else ""
         lines.append(
             f"{i:>2}. {h['symbol']} ({chain}, {h['stage']})\n"
             f"    alerted {datetime.fromtimestamp(h['at']):%b %d %I:%M %p} at {money(h['mc'])}, {dur(h['age'])} after launch\n"
             f"    now {money(now_mc)}{chg} · liq {money(h['liq'])} · {h['buys']}/{h['sells']} buys/sells 1h at alert\n"
             f"    contract {h['token']}\n"
-            f"    {h['url']}\n")
+            + (f"    {jl}\n" if jl else "")
+            + f"    {h['url']}\n")
     first, last = hits[0]["at"], hits[-1]["at"]
     subject = (f"Coin launch digest: {len(hits)} new coins over threshold "
                f"({datetime.fromtimestamp(first):%b %d %I:%M %p} to {datetime.fromtimestamp(last):%I:%M %p})")
     body = ("New Solana and Base coins that crossed the market-cap threshold within 4h of launch and "
             "passed the liquidity, buyer and honeypot filters.\n"
             "To buy in the Coinbase app, search by contract address (onchain trading covers Solana and Base; "
-            "a given token can still be missing there).\n\n" + "\n".join(lines) +
-            "\nMost of these go to zero. An alert is a coin crossing a line, not a buy signal.\n"
+            "a given token can still be missing there).\n\n" + "\n".join(lines)
+            + ("\nJev lines are an unvalidated read of the coin's name and description; "
+               "`python jev_shadow.py` shows whether they have predicted anything yet.\n"
+               if cfg_jev_in_digest() else "")
+            + "\nMost of these go to zero. An alert is a coin crossing a line, not a buy signal.\n"
             "- coin-launch-agent (~/coin-launch-agent)")
     ok = send_email(subject, body)
     log(f"digest email {'sent' if ok else 'FAILED, will retry on the next hit'}: {len(hits)} coins")

@@ -258,6 +258,9 @@ class Watcher:
                 notify(f"🆕 Coinbase lists {b} · {', '.join(pairs)}", f"status {status}",
                        self.cfg["alerts"], speak=f"Coinbase just listed {b}",
                        detail=f"New Coinbase Exchange product(s): {pairs} (status {status})")
+                if self.cfg.get("coinbase_listing_email") and not self.cfg["alerts"].get("email"):
+                    send_email(f"Coinbase lists {b}: {', '.join(pairs)}",
+                               f"New Coinbase Exchange product(s): {pairs} (status {status})")
         self.cb_bases = bases
 
     # ---- output ----------------------------------------------------------------

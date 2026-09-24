@@ -1,17 +1,28 @@
 {
   "_threshold_comment": "min_mc_usd raised from 50000 to 150000 by the user 2026-09-23: at $50k nearly every pump.fun graduation fired (~100/hr).",
   "_comment": "Thresholds for the launch watcher. A token alerts once when its market cap reaches min_mc_usd within max_age_hours of its first pool. The sanity filters drop bundled or fake-cap launches; set them to 0 to see everything.",
-  "networks": ["solana", "base"],
+  "networks": [
+    "solana",
+    "base"
+  ],
   "min_mc_usd": 150000,
   "max_age_hours": 4,
   "min_liquidity_usd": 8000,
   "min_buys_h1": 100,
-  "min_sell_ratio": 0.10,
+  "min_sell_ratio": 0.1,
   "_min_sell_ratio_comment": "Honeypot filter: hold a coin whose 1h sells are under this fraction of its buys. In a 2026-09-23 sample, organic graduations ran 0.13-0.73; suspected honeypots ran ~0.03 (e.g. 3526 buys / 11 sells). A held coin can still alert later if sells pick up inside the window.",
   "max_mc_to_liquidity": 100,
   "max_alerts_per_hour": 20,
   "coinbase_listings": true,
+  "email_digest": {
+    "_comment": "One email per batch of this many hits (muted ones included), sent via ~/flip-notifier/send-email.js to darup67@gmail.com. Added 2026-09-23 at the user's request.",
+    "enabled": true,
+    "every": 20
+  },
   "alerts": {
+    "_comment": "popup = auto-closing alert window (the banner applet never showed on this Mac, 2026-09-23); banner kept in case notifications get allowed.",
+    "popup": true,
+    "popup_seconds": 30,
     "banner": true,
     "sound": true,
     "sound_file": "/System/Library/Sounds/Submarine.aiff",

@@ -6,6 +6,7 @@ the last few hours reaches a market-cap threshold (default: $50k within 4h).
   agent.py --run         continuous watcher (launchd keeps it alive); banner + sound per hit
   agent.py --run --dry   same, with every alert channel off (log only)
   agent.py --test-alert  fire one sample alert through every enabled channel
+  agent.py --test-digest email the coins queued for the next digest now (doesn't clear the queue)
 
 Read-only: it never trades and holds no keys. It records nothing except a
 dedupe list of what already alerted (data/state.json, pruned to 24h) and the
@@ -78,6 +79,7 @@ class Watcher:
         st = st or {}
         self.alerted = st.get("alerted", {})              # "net:token" -> alert time
         self.cb_bases = set(st.get("cb_bases", []))
+        self.digest = st.get("digest", [])                # hits waiting for the next digest email
         self.alert_times = deque(sorted(t for t in self.alerted.values() if time.time() - t < 3600))
         self.last_intake = self.last_cb = self.last_beat = 0
         self.intakes = self.gt_calls = self.ds_calls = 0
@@ -217,6 +219,7 @@ class Watcher:
         if self.seeding:
             log(f"already over at first start (no banner) {line}")
             return
+        self.add_to_digest(h)
         while self.alert_times and time.time() - self.alert_times[0] > 3600:
             self.alert_times.popleft()
         if len(self.alert_times) >= self.cfg["max_alerts_per_hour"]:
@@ -230,6 +233,18 @@ class Watcher:
         notify(title, body, self.cfg["alerts"],
                speak=f"{h['symbol']} hit {h['mc'] / 1000:.0f} thousand in {dur(h['age'])}",
                detail=f"{title}\n{body}\n{h['url']}")
+
+    # ---- digest email ------------------------------------------------------------
+    def add_to_digest(self, h):
+        """Every hit (muted ones too) joins the digest; each full batch goes out as one email."""
+        d = self.cfg.get("email_digest", {})
+        if not d.get("enabled"):
+            return
+        self.digest.append({k: h[k] for k in ("symbol", "net", "token", "mc", "liq", "buys", "sells",
+                                              "stage", "dex", "url", "age")} | {"at": time.time()})
+        n = d.get("every", 20)
+        if len(self.digest) >= n and send_digest(self.digest[:n]):
+            self.digest = self.digest[n:]
 
     # ---- Coinbase listings -----------------------------------------------------
     def coinbase(self):
@@ -277,7 +292,8 @@ class Watcher:
                         self.seeding = False
                         log("seeding done; alerts are live")
                 self.refresh_due()
-                save(STATE, {"alerted": self.alerted, "cb_bases": sorted(self.cb_bases)})
+                save(STATE, {"alerted": self.alerted, "cb_bases": sorted(self.cb_bases),
+                             "digest": self.digest})
                 save(LIVE, {"updated": now, "rows": self.board()})
                 if now - self.last_beat >= 600:
                     self.last_beat = now
@@ -301,6 +317,14 @@ def notify(title, body, cfg, speak="", detail=""):
             subprocess.run(cmd, capture_output=True, timeout=20)
         except Exception as e:
             log(f"alert channel {cmd[0]} failed: {e}")
+    if cfg.get("popup", False):
+        # A small alert window that closes itself. Unlike banners it needs no notification
+        # permission; the applet banner never registered on this Mac (2026-09-23).
+        # Not awaited: the watcher is long-running, so launchd doesn't reap it.
+        subprocess.Popen(["/usr/bin/osascript", "-e", "on run argv", "-e",
+                          "display alert (item 1 of argv) message (item 2 of argv) giving up after "
+                          + str(int(cfg.get("popup_seconds", 30))), "-e", "end run", title, body],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if cfg.get("banner", True):
         with open(os.path.join(DATA, "alert.txt"), "w") as f:
             f.write(title.replace("\n", " ") + "\n" + body.replace("\n", " ") + "\n")
@@ -311,7 +335,58 @@ def notify(title, body, cfg, speak="", detail=""):
     if cfg.get("speak", False) and speak:
         run(["/usr/bin/say", speak])
     if cfg.get("email", False):
-        run(["node", os.path.expanduser("~/flip-notifier/send-email.js"), title, detail or body])
+        send_email(title, detail or body)
+
+
+def send_email(subject, body):
+    """Gmail via flip-notifier's sender; the app password comes from Keychain, as there."""
+    try:
+        pw = subprocess.run(["/usr/bin/security", "find-generic-password", "-a", "darup67@gmail.com",
+                             "-s", "flip-notifier-gmail", "-w"],
+                            capture_output=True, text=True, timeout=10).stdout.strip()
+        r = subprocess.run(["node", os.path.expanduser("~/flip-notifier/send-email.js"), subject, body],
+                           capture_output=True, text=True, timeout=40,
+                           env={**os.environ, "FLIP_GMAIL_APP_PASSWORD": pw, "SEND_EMAIL_TIMEOUT_MS": "35000"})
+        if r.returncode:
+            log(f"email failed: {r.stderr.strip()[-200:]}")
+        return r.returncode == 0
+    except Exception as e:
+        log(f"email failed: {e!r}")
+        return False
+
+
+def send_digest(hits):
+    """One email for a batch of hits, each with its market cap now, re-read from DexScreener."""
+    lines = []
+    for i, h in enumerate(hits, 1):
+        now_mc = None
+        try:
+            pairs = feeds.ds_token_pairs(h["net"], h["token"])
+            amm = [p for p in pairs if p["liq"] > 0]
+            if amm:
+                now_mc = max(amm, key=lambda p: p["liq"])["mc"]
+        except Exception:
+            pass
+        chg = f" ({(now_mc / h['mc'] - 1) * 100:+.0f}%)" if now_mc and h["mc"] else ""
+        chain = "Solana" if h["net"] == "solana" else h["net"].capitalize()
+        lines.append(
+            f"{i:>2}. {h['symbol']} ({chain}, {h['stage']})\n"
+            f"    alerted {datetime.fromtimestamp(h['at']):%b %d %I:%M %p} at {money(h['mc'])}, {dur(h['age'])} after launch\n"
+            f"    now {money(now_mc)}{chg} · liq {money(h['liq'])} · {h['buys']}/{h['sells']} buys/sells 1h at alert\n"
+            f"    contract {h['token']}\n"
+            f"    {h['url']}\n")
+    first, last = hits[0]["at"], hits[-1]["at"]
+    subject = (f"Coin launch digest: {len(hits)} new coins over threshold "
+               f"({datetime.fromtimestamp(first):%b %d %I:%M %p} to {datetime.fromtimestamp(last):%I:%M %p})")
+    body = ("New Solana and Base coins that crossed the market-cap threshold within 4h of launch and "
+            "passed the liquidity, buyer and honeypot filters.\n"
+            "To buy in the Coinbase app, search by contract address (onchain trading covers Solana and Base; "
+            "a given token can still be missing there).\n\n" + "\n".join(lines) +
+            "\nMost of these go to zero. An alert is a coin crossing a line, not a buy signal.\n"
+            "- coin-launch-agent (~/coin-launch-agent)")
+    ok = send_email(subject, body)
+    log(f"digest email {'sent' if ok else 'FAILED, will retry on the next hit'}: {len(hits)} coins")
+    return ok
 
 
 def show_board(cfg):
@@ -343,8 +418,12 @@ def main():
     os.makedirs(DATA, exist_ok=True)
     if "--dry" in sys.argv:
         cfg["alerts"] = {k: False for k in cfg["alerts"]}
+        cfg["email_digest"] = {"enabled": False}
     if "--run" in sys.argv:
         Watcher(cfg).run()
+    elif "--test-digest" in sys.argv:
+        hits = load(STATE, {}).get("digest", [])
+        print("sent" if hits and send_digest(hits) else f"nothing sent ({len(hits)} coins queued)")
     elif "--test-alert" in sys.argv:
         notify("🚀 TEST $72.4k in 38m · graduated · SOL", "liq $24k · 1180/640 buys/sells 1h · test alert",
                cfg["alerts"], speak="Test coin hit 72 thousand in 38 minutes")

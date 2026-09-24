@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.dhruv.coinlaunch.score</string>
+  <key>ProgramArguments</key><array><string>/Users/dhruvpatel/.venvs/market-ml/bin/python</string><string>-u</string><string>/Users/dhruvpatel/coin-launch-agent/score.py</string></array>
+  <key>WorkingDirectory</key><string>/Users/dhruvpatel/coin-launch-agent</string>
+  <key>StartCalendarInterval</key><array><dict><key>Minute</key><integer>1</integer></dict><dict><key>Minute</key><integer>6</integer></dict><dict><key>Minute</key><integer>11</integer></dict><dict><key>Minute</key><integer>16</integer></dict><dict><key>Minute</key><integer>21</integer></dict><dict><key>Minute</key><integer>26</integer></dict><dict><key>Minute</key><integer>31</integer></dict><dict><key>Minute</key><integer>36</integer></dict><dict><key>Minute</key><integer>41</integer></dict><dict><key>Minute</key><integer>46</integer></dict><dict><key>Minute</key><integer>51</integer></dict><dict><key>Minute</key><integer>56</integer></dict></array>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/local/git/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HF_HUB_OFFLINE</key><string>1</string>
+    <key>TOKENIZERS_PARALLELISM</key><string>false</string>
+  </dict>
+  <key>StandardOutPath</key><string>/Users/dhruvpatel/coin-launch-agent/score.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/dhruvpatel/coin-launch-agent/score.err.log</string>
+</dict>
+</plist>

@@ -5,8 +5,8 @@ app trades onchain. It fires a banner and a sound when a coin that **launched or
 graduated** in the last **4 hours** reaches **$150k market cap**. It also flags new
 Coinbase Exchange listings.
 
-Read-only: it never trades, holds no keys, and records nothing except a dedupe
-list and the current board.
+Read-only: it never trades and holds no keys. It keeps a dedupe list, the
+current board, and pump.fun training history in `data/`.
 
 ```
 New coins ≤4h old · threshold $150.0k · watcher, updated 4s ago
@@ -118,6 +118,44 @@ nearly every graduation that gets real buying: roughly 100 an hour. The hourly
 cap keeps banners to 20. **On 2026-09-23 the threshold was raised to $150k** and
 the honeypot filter was added. To make it stricter again, raise `min_mc_usd` or
 `min_buys_h1`.
+
+## Explosion model: Chronos-2 + AutoGluon (every 5 minutes)
+
+The question, asked at every 5-minute tick about each **graduated pump.fun coin
+under 4h old and worth at least $75k**: *will its market cap reach 2× within the
+next 60 minutes?*
+
+| piece | does |
+|---|---|
+| `pump.py` | pump.fun data: the graduated-coins list (it pages back about 1.5–2 days) and 5-minute candles from launch. Price × 1B supply = market cap. |
+| `ml.py` | shared features, so training and live scoring compute the same thing: returns over 5/15/30/60 min, drawdown from the high, volume and its acceleration, activity, realized volatility, age, launch spike. Chronos-2 (`amazon/chronos-2`, run on the Mac's GPU) forecasts the next 12 bars of log market cap with volume as a covariate; its 10/50/90% quantiles become 7 more features. |
+| `train.py` | backfills history, builds one row per coin per tick with the label, fits **AutoGluon Tabular** (`best_quality`, 5-fold bagging grouped by coin, 1 stacking level), and trains a no-Chronos copy to measure what Chronos adds. Writes `results/report.md` and `models/meta.json`. |
+| `score.py` | live, at :01/:06/…: scores the watcher's candidates and writes `data/scores.json` (shown on the board). If the model has a gate, emails picks. |
+
+**Rules fixed before any data was seen:**
+- Split by launch time: oldest 60% of coins train, next 20% validate, newest 20% test. A coin's rows never appear in two splits.
+- The gate is the lowest probability whose **validation** precision is at least 2× the validation base rate, with at least 20 picks. If none qualifies there is no gate, and the model only ranks on the board.
+- Test is scored once and reported as it comes out, next to three baselines: 15-minute momentum, Chronos-2 alone, and AutoGluon without Chronos.
+
+**Why the $75k floor:** pump.fun coins graduate below it. So every coin at
+$75k+ is already on the graduated list, and drawing training coins from that
+list adds no survivorship bias.
+
+| launchd label | schedule | does |
+|---|---|---|
+| `com.dhruv.coinlaunch.score` | :01, :06, … every 5 min | score candidates, update the board, email picks |
+| `com.dhruv.coinlaunch.train` | daily 05:15 | backfill, retrain, commit `results/report.md` + `models/meta.json`, push |
+
+```
+~/.venvs/market-ml/bin/python train.py            # backfill + train + report (~25 min)
+~/.venvs/market-ml/bin/python score.py --print    # one scoring tick, printed
+```
+
+The first results are in [`results/report.md`](results/report.md). Coverage is
+pump.fun coins only; Base coins and other Solana launchpads still get the
+threshold alerts but no score. Training history is cached in `data/pump/`, which
+is not committed. It is the one thing this repo keeps on disk, because a model
+can't be trained without it, and it grows every night.
 
 ## Not advice
 

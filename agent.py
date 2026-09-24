@@ -17,6 +17,7 @@ from collections import deque
 from datetime import datetime
 
 import feeds
+import jev_shadow
 from feeds import RateLimited
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -151,6 +152,7 @@ class Watcher:
         if created:   # the oldest pool is the token's real age; a new pool can belong to an old coin
             t["launch"] = min([t["launch"] or now] + created)
         t["symbol"] = clean(best["symbol"]) if best["symbol"] else t["symbol"]
+        t["meta"] = {"name": best["name"], "info": next((p["info"] for p in pairs if p["info"]), None)}
         t["snap"] = {"mc": best["mc"], "liq": best["liq"], "dex": best["dex"], "url": best["url"],
                      "buys": sum(p["buys"] for p in pairs), "sells": sum(p["sells"] for p in pairs),
                      "vol": sum(p["vol"] for p in pairs), "stage": stage}
@@ -220,6 +222,7 @@ class Watcher:
             log(f"already over at first start (no banner) {line}")
             return
         self.add_to_digest(h)
+        jev_shadow.judge(h)   # shadow: logs Jev's read of the coin, changes nothing here
         while self.alert_times and time.time() - self.alert_times[0] > 3600:
             self.alert_times.popleft()
         if len(self.alert_times) >= self.cfg["max_alerts_per_hour"]:
@@ -295,6 +298,7 @@ class Watcher:
                         self.seeding = False
                         log("seeding done; alerts are live")
                 self.refresh_due()
+                jev_shadow.outcomes(self)
                 save(STATE, {"alerted": self.alerted, "cb_bases": sorted(self.cb_bases),
                              "digest": self.digest})
                 save(LIVE, {"updated": now, "rows": self.board()})

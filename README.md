@@ -172,3 +172,19 @@ can't be trained without it, and it grows every night.
 Most of these coins go to zero, and many graduations are coordinated. The
 filters remove obvious fakes, not rugs. An alert means a coin crossed a line; it
 is not a buy signal.
+
+## Jev shadow (since 2026-09-24)
+
+`jev_shadow.py` asks Jev (via `~/jev-client`) about every hit, muted ones
+included, from text alone: name, ticker, pump.fun description and links. It
+asks about brand or celebrity impersonation, how clear the concept is, and
+pump/scam language. The call runs in a thread, so the watcher never waits on
+it. Each coin's cap is re-read ~60 min after the alert (from the watcher's own
+DexScreener budget). Nothing changes alerts, the digest or model picks.
+
+```
+~/.venvs/market-ml/bin/python jev_shadow.py   # held / halved / median by each Jev answer
+```
+
+Wait for ~100+ outcomes before acting. `data/jev.jsonl` and `data/jev_outcomes.jsonl`
+hold the raw records. No API key means it does nothing.

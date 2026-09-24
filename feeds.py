@@ -102,7 +102,8 @@ def ds_token_pairs(net, token):
         tx = (p.get("txns") or {}).get("h1") or {}
         out.append({
             "pair": p["pairAddress"], "dex": p.get("dexId", ""), "url": p.get("url", ""),
-            "symbol": p["baseToken"].get("symbol", ""),
+            "symbol": p["baseToken"].get("symbol", ""), "name": p["baseToken"].get("name", ""),
+            "info": p.get("info"),   # websites / socials, for jev_shadow
             "created": (p.get("pairCreatedAt") or 0) / 1000 or None,
             "mc": num(p.get("marketCap")) or num(p.get("fdv")),
             "liq": num((p.get("liquidity") or {}).get("usd")) or 0.0,

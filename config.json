@@ -1,0 +1,18 @@
+{
+  "_comment": "Thresholds for the launch watcher. A token alerts once when its market cap reaches min_mc_usd within max_age_hours of its first pool. The sanity filters drop bundled or fake-cap launches; set them to 0 to see everything.",
+  "networks": ["solana", "base"],
+  "min_mc_usd": 50000,
+  "max_age_hours": 4,
+  "min_liquidity_usd": 8000,
+  "min_buys_h1": 100,
+  "max_mc_to_liquidity": 100,
+  "max_alerts_per_hour": 20,
+  "coinbase_listings": true,
+  "alerts": {
+    "banner": true,
+    "sound": true,
+    "sound_file": "/System/Library/Sounds/Submarine.aiff",
+    "speak": false,
+    "email": false
+  }
+}

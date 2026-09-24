@@ -20,13 +20,14 @@
     "every": 20
   },
   "alerts": {
-    "_comment": "popup = auto-closing alert window (the banner applet never showed on this Mac, 2026-09-23); banner kept in case notifications get allowed.",
-    "popup": true,
+    "_comment": "Desktop channels (popup, banner, sound) turned off by the user 2026-09-23; email digest only. Set any back to true to re-enable.",
+    "popup": false,
     "popup_seconds": 30,
-    "banner": true,
-    "sound": true,
+    "banner": false,
+    "sound": false,
     "sound_file": "/System/Library/Sounds/Submarine.aiff",
     "speak": false,
     "email": false
-  }
+  },
+  "coinbase_listing_email": true
 }

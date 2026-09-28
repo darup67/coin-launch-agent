@@ -105,15 +105,29 @@ def top1_end(df, score):
 
 
 def fit(train, features, name, time_limit):
+    """Fit into models/<name>.new and swap it in only if it produced models.
+
+    Until 2026-09-28 this fitted straight into models/<name> after deleting it, so
+    the failed nights of Sep 27 and 28 (every model out of time or failing to
+    import FastAI, on a Mac loaded by a Backblaze upload) left no working model
+    and score.py had nothing to load. A failed fit now keeps yesterday's model.
+    FastAI is excluded: it raised ImportError on every run and only burned budget."""
     from autogluon.tabular import TabularPredictor
-    path = os.path.join(MODELS, name)
     import shutil
-    shutil.rmtree(path, ignore_errors=True)   # a fresh fit each run
+    path = os.path.join(MODELS, name)
+    tmp = path + ".new"
+    shutil.rmtree(tmp, ignore_errors=True)
     p = TabularPredictor(label=LABEL, problem_type="binary", eval_metric="log_loss",
-                         path=path, groups="mint", verbosity=1)
+                         path=tmp, groups="mint", verbosity=1)
     p.fit(train[features + [LABEL, "mint"]], presets="best_quality", time_limit=time_limit,
-          dynamic_stacking=False, num_bag_folds=5, num_stack_levels=1)
-    return p
+          dynamic_stacking=False, num_bag_folds=5, num_stack_levels=1,
+          excluded_model_types=["FASTAI"])
+    if not p.model_names():
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise RuntimeError(f"{name}: no models trained; keeping the previous model")
+    shutil.rmtree(path, ignore_errors=True)
+    os.replace(tmp, path)
+    return TabularPredictor.load(path, require_py_version_match=False)
 
 
 def main():

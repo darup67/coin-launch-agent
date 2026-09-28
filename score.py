@@ -38,6 +38,12 @@ def load(path, default):
 
 
 def main():
+    # A hung run blocks every later one (launchd won't start a job that is still
+    # running): score.py sat deadlocked on a thread lock from Sep 26 18:06 to Sep 28
+    # 10:30 and scores went 40 h stale. faulthandler's own C thread hard-exits after
+    # 240 s even if Python is stuck in a lock wait; runs are 5 minutes apart.
+    import faulthandler
+    faulthandler.dump_traceback_later(240, exit=True)
     now_ms = time.time() * 1000
     meta = load(os.path.join(HERE, "models", "meta.json"), None)
     tracked = load(os.path.join(DATA, "tracked.json"), {})

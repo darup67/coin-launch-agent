@@ -15,19 +15,31 @@ UA = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 SUPPLY = 1e9
 
 
+# Keep-alive sessions, one per thread (the scorers and backfill fetch from thread pools). A fresh
+# TLS connection per candle request was most of their CPU (2026-09-28).
+import threading, requests
+_local = threading.local()
+
+
+def _session():
+    s = getattr(_local, "s", None)
+    if s is None:
+        s = _local.s = requests.Session()
+        s.headers.update(UA)
+    return s
+
+
 def get(url, tries=4):
     for i in range(tries):
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=20) as r:
-                return json.load(r)
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
+            r = _session().get(url, timeout=20)
+            if r.status_code == 429:
                 time.sleep(3 * (i + 1))
                 continue
-            if e.code in (400, 404):
+            if r.status_code in (400, 404):
                 return None
-            if i == tries - 1:
-                raise
+            r.raise_for_status()
+            return r.json()
         except Exception:
             if i == tries - 1:
                 raise

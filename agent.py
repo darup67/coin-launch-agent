@@ -355,7 +355,7 @@ def send_email(subject, body):
         pw = subprocess.run(["/usr/bin/security", "find-generic-password", "-a", "darup67@gmail.com",
                              "-s", "flip-notifier-gmail", "-w"],
                             capture_output=True, text=True, timeout=10).stdout.strip()
-        r = subprocess.run(["node", os.path.expanduser("~/flip-notifier/send-email.js"), subject, body],
+        r = subprocess.run([os.path.expanduser("~/.local/bin/node"), os.path.expanduser("~/flip-notifier/send-email.js"), subject, body],
                            capture_output=True, text=True, timeout=40,
                            env={**os.environ, "FLIP_GMAIL_APP_PASSWORD": pw, "SEND_EMAIL_TIMEOUT_MS": "35000"})
         if r.returncode:

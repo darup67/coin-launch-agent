@@ -35,6 +35,6 @@
   "jev_in_digest": true,
   "_jev_in_digest_comment": "Adds Jev's read (impersonation, concept, scam language) under each coin in the digest email. Turned on by the user 2026-09-24. Alerts and picks are unchanged.",
   "_emails_paused": "All emails paused by the user 2026-09-24 11:4x. Set email_digest.enabled, coinbase_listing_email, ml_picks_email back to true to resume.",
-  "plus50_email": false,
-  "_plus50_comment": "2026-09-28: the detector shows only coins with a good chance of +50% one hour after being added (plus50.py; a coin shows only if held-out coins with that score hit +50% at least 40% of the time). plus50_email sends each pick once. Off because all emails were paused 2026-09-24; set true to get picks by email."
+  "plus50_email": true,
+  "_plus50_comment": "2026-09-28: the detector shows only coins with a good chance of +50% one hour after being added (plus50.py; a coin shows only if held-out coins with that score hit +50% at least 40% of the time). plus50_email sends each pick once. Turned ON by the user 2026-09-28 (the other emails stay paused)."
 }

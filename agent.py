@@ -422,25 +422,15 @@ def show_board(cfg):
                 t["due"] = float("inf")
         w.refresh_due(reserve=0)
         rows, src = w.board(), "one-shot scan (watcher not running)"
-    sc = load(os.path.join(DATA, "scores.json"), None)
-    if sc and time.time() - sc["updated"] > 600:
-        sc = None
-    pmap = {r["token"]: r["p"] for r in sc["rows"]} if sc else {}
+    pmap = {}
     thr = cfg["min_mc_usd"]
     print(f"New coins ≤{cfg['max_age_hours']}h old · threshold {money(thr)} · {src}\n")
     if not rows:
         print(f"  nothing at or above {money(thr / 2)} right now")
     for r in rows[:25]:
         mark = "✗ " if r["why"] else "🚀" if r["mc"] >= thr else "  "
-        p = f"  P(2× held) {pmap[r['token']]:.0%}" if r["token"] in pmap else ""
+        p = ""
         print(f"{mark} {card_line(r)}{p}" + (f"   ← {', '.join(r['why'])}" if r["why"] else ""))
-    if sc:
-        gate = f"gate P ≥ {sc['gate']:.0%}" if sc["gate"] is not None else "no gate: ranking only"
-        print(f"\nModel, P(still 2× in 60 min), {dur(time.time() - sc['updated'])} ago · {gate} · "
-              f"base rate {sc['base_rate'] or 0:.0%} · {len(sc['rows'])} scored")
-        for r in sc["rows"][:8]:
-            print(f"  {r['p']:>4.0%}  {r['symbol'][:12]:<12} ${r['mc'] / 1000:>7,.0f}k  {r['age_min']:>4.0f}m old"
-                  + ("  PICK" if r["pick"] else "") + (f"  ← {', '.join(r['why'])}" if r["why"] else ""))
     print("\n🚀 over threshold, passes filters   ✗ held back by a filter   blank = approaching"
           "\nAlready-alerted coins leave the board; they are in agent.out.log.")
 

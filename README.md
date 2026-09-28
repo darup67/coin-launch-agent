@@ -35,7 +35,7 @@ queued right away.
 
 ## Retired 2026-09-28: the 2× model
 
-`com.dhruv.coinlaunch.score` (every 5 min) and `.train` (nightly) are disabled (`launchctl disable`); the code stays. The model's picks lost money on test (median 0.08×), its emails had been off since 9/24, and it was the Mac's heaviest job (~800 MB bursts every 5 min, ~25 min of nightly training). The +50% model replaced it. To bring it back: `launchctl enable gui/501/com.dhruv.coinlaunch.score` and bootstrap the plist, and the same for `.train`.
+`score.py`, `train.py` and their LaunchAgents were removed. The code is in git history and the plists are in `~/Library/LaunchAgents.retired-20260928/`. The pump.fun backfill that plus50 needs now lives in `pump.backfill()`. The model's picks lost money on test (median 0.08×), its emails had been off since 9/24, and it was the Mac's heaviest job (~800 MB bursts every 5 min, ~25 min of nightly training). The +50% model replaced it.
 
 ## Only the coins worth looking at (+50% filter, since 2026-09-28)
 

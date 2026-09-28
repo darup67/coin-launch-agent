@@ -91,3 +91,29 @@ def save_candles(mint, bars):
     os.makedirs(os.path.join(CACHE, "candles"), exist_ok=True)
     with open(os.path.join(CACHE, "candles", mint + ".json"), "w") as f:
         json.dump(bars, f)
+
+
+LOOKBACK_H = 80       # the 5m endpoint returns 1000 bars ≈ 83h, so older launches lose their first hours
+
+
+def backfill(fetch=True, min_mc=75_000, window_min=330, log=print):
+    """Every graduated coin worth >= min_mc with candles, caching each coin's candles once its
+    training window has closed (moved here from the retired train.py, 2026-09-28)."""
+    import json, time
+    from concurrent.futures import ThreadPoolExecutor
+    coins = graduated() if fetch else json.load(open(os.path.join(CACHE, "coins.json")))
+    now = time.time() * 1000
+    todo = [c for c in coins.values() if (c.get("ath_market_cap") or 0) >= min_mc
+            and now - c["created_timestamp"] < LOOKBACK_H * 3.6e6 or
+            os.path.exists(os.path.join(CACHE, "candles", c["mint"] + ".json"))]
+    log(f"{len(coins)} graduated coins cached, {len(todo)} reached ${min_mc:,.0f}")
+
+    def one(c):
+        done = now - c["created_timestamp"] > window_min * 60000
+        bars = candles_5m(c["mint"], cache=True) if fetch or done else []
+        if fetch and done and bars and not os.path.exists(os.path.join(CACHE, "candles", c["mint"] + ".json")):
+            save_candles(c["mint"], bars)
+        return c, bars
+
+    with ThreadPoolExecutor(12) as ex:
+        return list(ex.map(one, todo)), now

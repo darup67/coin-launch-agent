@@ -115,11 +115,10 @@ def auc(y, s):
 
 
 def train():
-    import train as nightly                             # reuse its pump.fun backfill + cache
     from autogluon.tabular import TabularPredictor
     cfg = load(os.path.join(HERE, "config.json"), {})
     entry_mc = float(cfg.get("min_mc_usd", 150_000))
-    pairs, until = nightly.backfill("--no-fetch" not in sys.argv)
+    pairs, until = pump.backfill("--no-fetch" not in sys.argv, log=log)
     df = build(pairs, until, entry_mc).sort_values("created").reset_index(drop=True)
     n = len(df)
     if n < 300:

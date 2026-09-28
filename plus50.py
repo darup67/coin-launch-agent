@@ -22,7 +22,7 @@ Evaluation rules, fixed before seeing results:
   plus50.py train [--no-fetch] [--push]   nightly: dataset from the pump.fun cache, fit, gate, report
   plus50.py score [--print]               every 5 min: judge coins added since the last run
 """
-import json, os, shutil, sys, time
+import json, os, re, shutil, sys, time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -256,23 +256,24 @@ def score():
         for (t, g, k, created, late), p in zip(new, ps):
             # candidate = passes the model gate and the watcher's filters; pick = candidate while the live
             # record holds. Candidates keep being scored and resolved while paused, so picks can resume.
-            cand = bool(meta["gate"] is not None and p >= meta["gate"] and not t.get("why") and late <= 15)
+            cand = bool(meta["gate"] is not None and p >= meta["gate"] and not blocking(t.get("why")) and late <= 15)
             pick = bool(cand and meta["live"] and not paused)
             judged[t["token"]] = {"symbol": t["symbol"], "p": round(float(p), 4), "pick": pick, "cand": cand,
                                   "entry_mc": float(g["close"][k]), "t_entry": g["t0"] + (k + 1) * ml.BAR_MS,
+                                  "launch_ms": created,
                                   "late_min": round(late, 1), "why": t.get("why") or [], "judged_at": now_ms}
             log(f"{'PICK' if pick else 'skip'} {t['symbol']} P={p:.0%} entry ${g['close'][k] / 1000:,.0f}k"
                 + (f" ({late:.0f}m late)" if late > 10 else "") + (f" ← {', '.join(t['why'])}" if t.get('why') else ""))
 
     # One hour after entry, record what actually happened (live hit rate, the honest scoreboard).
     due = [(tok, j) for tok, j in judged.items() if "end_mult" not in j and now_ms >= j["t_entry"] + (HORIZON * 5 + 5) * 60000]
+    # Read the coin's own candles, NOT the watcher's tracked list: the watcher drops coins once they
+    # alert or die, and resolving only survivors would hide every rug and flatter the live record.
     for tok, j in due:
-        t = by_token.get(tok)
-        created = int(t["launch"] * 1000) if t and t.get("launch") else None
-        g = bars_for(tok, created) if created else None
+        g = bars_for(tok, j.get("launch_ms") or j["t_entry"])
         if g is None:
-            if now_ms - j["t_entry"] > 3 * 3600_000:
-                j["end_mult"] = None                  # dropped by the watcher (dead coin); count as unknown
+            if now_ms - j["t_entry"] > 6 * 3600_000:
+                j["end_mult"] = None                  # candles unavailable for 6h: unknown
             continue
         k = int(round((j["t_entry"] - g["t0"]) / ml.BAR_MS)) - 1
         if 0 <= k < len(g["close"]):
@@ -296,6 +297,14 @@ def score():
             res = f"{j['end_mult']:.2f}x" if j.get("end_mult") is not None else "pending"
             print(f"  {'PICK' if j['pick'] else '    '} {j['p']:>4.0%}  {j['symbol'][:14]:<14} entry ${j['entry_mc'] / 1000:>6,.0f}k  1h: {res}")
     return 0
+
+
+def blocking(why):
+    """Watcher flags that still block a pick. The low-buy-count flag ("17 buys/1h") does not
+    (user, 2026-09-28): a coin that just graduated has a minutes-old pool, so nearly every
+    coin carries it at entry, and the 45% held-out hit rate was measured without it (BARRON
+    scored 44%, was blocked by it, and ran 2.42x). Honeypot, liquidity and fake-cap flags still block."""
+    return [w for w in (why or []) if not re.fullmatch(r"\d+ buys/1h", w)]
 
 
 def rolling(judged):

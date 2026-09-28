@@ -40,6 +40,7 @@ they were added**. Everything else is hidden; `agent.py --all` shows the old raw
 
 - **Added** = the first 5-minute close at or above `min_mc_usd` ($150k) within 4h of launch. That's the watcher's alert rule.
 - **Good chance** = held-out coins with that score hit +50% at least 40% of the time. The gate is set on validation and goes live only if the test set agrees (`results/plus50_report.md`).
+- **Filters:** honeypot, low-liquidity and fake-cap flags block a pick. The low-buy-count flag doesn't, because a just-graduated coin's pool is minutes old (user, 2026-09-28).
 - **Kill switch:** every judged coin's real 1-hour result is recorded. If the last 20 qualifying coins hit +50% less than 40% of the time, picks pause until the live record or a retrain recovers.
 - **Coverage:** only pump.fun coins on Solana. Base coins and other launchpads have no candle history, so they are never shown.
 

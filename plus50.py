@@ -269,15 +269,27 @@ def score():
     due = [(tok, j) for tok, j in judged.items() if "end_mult" not in j and now_ms >= j["t_entry"] + (HORIZON * 5 + 5) * 60000]
     # Read the coin's own candles, NOT the watcher's tracked list: the watcher drops coins once they
     # alert or die, and resolving only survivors would hide every rug and flatter the live record.
-    for tok, j in due:
+    # Save the new judgments first: a run cut off by the 240 s guard used to lose them (Sep 28 17:31).
+    save(STATE, st)
+    # Resolve in parallel, oldest first, within a time budget; whatever is left waits for the next run.
+    due.sort(key=lambda x: x[1]["t_entry"])
+    t_start = time.time()
+
+    def resolve(item):
+        tok, j = item
+        if time.time() - t_start > 120:
+            return
         g = bars_for(tok, j.get("launch_ms") or j["t_entry"])
         if g is None:
             if now_ms - j["t_entry"] > 6 * 3600_000:
                 j["end_mult"] = None                  # candles unavailable for 6h: unknown
-            continue
+            return
         k = int(round((j["t_entry"] - g["t0"]) / ml.BAR_MS)) - 1
         if 0 <= k < len(g["close"]):
             j["end_mult"] = end_mult(g, k)
+
+    with ThreadPoolExecutor(8) as ex:
+        list(ex.map(resolve, due[:60]))
     st["judged"] = {k: v for k, v in judged.items() if now_ms - v["judged_at"] < 7 * 86400_000}
     save(STATE, st)
 

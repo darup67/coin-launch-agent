@@ -41,19 +41,24 @@ class Limiter:
 gt_limit, ds_limit = Limiter(8), Limiter(200)
 
 
+# One keep-alive session (2026-09-28). The watcher makes ~3 DexScreener calls a second; with a
+# fresh urllib connection each, TLS handshakes were most of its ~8% constant CPU.
+import requests
+_session = requests.Session()
+_session.headers.update(UA)
+
+
 def get(url, limiter):
     if not limiter.take():
         raise RateLimited(url)
-    try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=15) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return None
-        if e.code == 429:
-            limiter.calls.extend([time.time()] * limiter.per_min)   # back off a full minute
-            raise RateLimited(url)
-        raise
+    r = _session.get(url, timeout=15)
+    if r.status_code == 404:
+        return None
+    if r.status_code == 429:
+        limiter.calls.extend([time.time()] * limiter.per_min)   # back off a full minute
+        raise RateLimited(url)
+    r.raise_for_status()
+    return r.json()
 
 
 def num(x):

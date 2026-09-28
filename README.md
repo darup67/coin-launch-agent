@@ -33,6 +33,25 @@ The queue is kept in `data/state.json`, so a restart doesn't lose it. Set
 `email_digest.every` to change the batch size; `--test-digest` sends what's
 queued right away.
 
+## Only the coins worth looking at (+50% filter, since 2026-09-28)
+
+`agent.py` now shows **only coins with a good chance of being worth 50% more one hour after
+they were added**. Everything else is hidden; `agent.py --all` shows the old raw board.
+
+- **Added** = the first 5-minute close at or above `min_mc_usd` ($150k) within 4h of launch. That's the watcher's alert rule.
+- **Good chance** = held-out coins with that score hit +50% at least 40% of the time. The gate is set on validation and goes live only if the test set agrees (`results/plus50_report.md`).
+- **Kill switch:** every judged coin's real 1-hour result is recorded. If the last 20 qualifying coins hit +50% less than 40% of the time, picks pause until the live record or a retrain recovers.
+- **Coverage:** only pump.fun coins on Solana. Base coins and other launchpads have no candle history, so they are never shown.
+
+Why: of 2,263 coins that reached $150k, the median was at 0.01x an hour later; most rug within the hour.
+
+| launchd label | schedule | does |
+|---|---|---|
+| `com.dhruv.coinlaunch.plus50` | every 5 min (:02, :07, …) | judges newly added coins once, records 1h outcomes, writes `data/plus50.json` |
+| `com.dhruv.coinlaunch.plus50train` | 06:00 daily | retrains on the pump.fun cache, re-sets the gate, commits the report |
+
+`plus50_email` in config.json emails each pick once (off while emails are paused).
+
 ## Commands
 
 ```

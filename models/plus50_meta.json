@@ -1,0 +1,46 @@
+{
+ "trained": "2026-09-28T18:37:21.011010+00:00",
+ "entry_mc": 150000.0,
+ "mult": 1.5,
+ "horizon_min": 60,
+ "min_hit": 0.4,
+ "features": [
+  "age_min",
+  "log_mc",
+  "ret_5m",
+  "ret_15m",
+  "ret_30m",
+  "ret_60m",
+  "ret_since_launch",
+  "drawdown",
+  "bars_since_ath",
+  "log_ath",
+  "log_vol_5m",
+  "log_vol_15m",
+  "log_vol_60m",
+  "vol_accel",
+  "active_30m",
+  "rv_30m",
+  "up_frac_30m",
+  "max_bar_jump",
+  "log_first_close",
+  "bars_to_75k",
+  "hour_utc"
+ ],
+ "gate": 0.16,
+ "live": true,
+ "gate_val": {
+  "n": 117,
+  "hit": 0.4188034188034188
+ },
+ "gate_test": {
+  "n": 121,
+  "hit": 0.45454545454545453,
+  "median_end_mult": 0.7674246445588611,
+  "mean_end_mult": 1.196051915778258
+ },
+ "base_rate_test": 0.334070796460177,
+ "coins": 2263,
+ "auc_val": 0.7910698154600594,
+ "auc_test": 0.6297111174671625
+}

@@ -15,7 +15,7 @@ The evaluation rules are fixed before any data is seen:
   - Test is scored once and reported as it comes out, with the baselines
     (15-minute momentum, Chronos-2 alone, AutoGluon without Chronos) run alongside.
 """
-import json, os, subprocess, sys, time
+import json, os, subprocess, sys, time, zlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -119,7 +119,11 @@ def fit(train, features, name, time_limit):
     shutil.rmtree(tmp, ignore_errors=True)
     p = TabularPredictor(label=LABEL, problem_type="binary", eval_metric="log_loss",
                          path=tmp, groups="mint", verbosity=1)
-    p.fit(train[features + [LABEL, "mint"]], presets="best_quality", time_limit=time_limit,
+    # AutoGluon makes one bag fold per distinct group, ignoring num_bag_folds. Grouping by raw
+    # mint meant ~1,650 folds of ~0.4s each, so every model timed out (Sep 27-28 2026). Hash
+    # each coin into 5 stable buckets: still no coin split across folds, and 5 real folds.
+    data = train[features + [LABEL]].assign(mint=train["mint"].map(lambda m: zlib.crc32(m.encode()) % 5))
+    p.fit(data, presets="best_quality", time_limit=time_limit,
           dynamic_stacking=False, num_bag_folds=5, num_stack_levels=1,
           excluded_model_types=["FASTAI"])
     if not p.model_names():

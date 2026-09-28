@@ -445,6 +445,34 @@ def show_board(cfg):
           "\nAlready-alerted coins leave the board; they are in agent.out.log.")
 
 
+def show_picks(cfg):
+    """Default view since 2026-09-28: only coins with a good chance of +50% one hour after being
+    added (plus50.py). Everything else is hidden; `agent.py --all` shows the full watcher board."""
+    d = load(os.path.join(DATA, "plus50.json"), None)
+    if not d or time.time() - d["updated"] > 900:
+        print("No fresh +50% judgments (is com.dhruv.coinlaunch.plus50 running?). `agent.py --all` shows the raw board.")
+        return
+    day = [r for r in d["rows"] if time.time() * 1000 - r["t_entry"] < 86400_000]
+    picks = [r for r in day if r["pick"]]
+    rl = d.get("rolling") or {}
+    status = ("picks OFF: no score reached a 40% held-out hit rate, so nothing is shown" if not d["live"] else
+              f"picks PAUSED: only {rl['hits']}/{rl['n']} recent qualifying coins hit +50% (needs 40%)" if d.get("paused") else
+              f"picks LIVE at P ≥ {d['gate']:.0%} (held-out hit rate {d['test_hit']:.0%} vs {d['base_rate']:.0%} base; "
+              f"live {rl.get('hits', 0)}/{rl.get('n', 0)})")
+    print(f"+50% within 1h of being added (${d['entry_mc'] / 1000:,.0f}k) · last 24h · {status}\n")
+    if not picks:
+        print("  no picks")
+    for r in picks:
+        res = (f"1h result {r['end_mult']:.2f}x {'✅' if r['end_mult'] >= 1.5 else '❌'}" if r.get("end_mult") is not None
+               else "1h result pending")
+        now_mc = f"now {money(r['mc_now'])}" if r.get("mc_now") else ""
+        print(f"🎯 {r['symbol'][:12]:<12} P {r['p']:.0%}  added {datetime.fromtimestamp(r['t_entry'] / 1000):%H:%M} at "
+              f"{money(r['entry_mc'])}  {now_mc:<12} {res}\n   {r['token']}")
+    rec = d["live_record"]
+    print(f"\nHidden: {len(day) - len(picks)} other coins added in the last 24h. "
+          f"Live record so far: {rec['hits']}/{rec['picks']} picks hit +50%. `agent.py --all` = raw board.")
+
+
 def main():
     cfg = load(os.path.join(HERE, "config.json"), {})
     os.makedirs(DATA, exist_ok=True)
@@ -460,8 +488,10 @@ def main():
         notify("🚀 TEST $72.4k in 38m · graduated · SOL", "liq $24k · 1180/640 buys/sells 1h · test alert",
                cfg["alerts"], speak="Test coin hit 72 thousand in 38 minutes")
         print("sent")
-    else:
+    elif "--all" in sys.argv:
         show_board(cfg)
+    else:
+        show_picks(cfg)
 
 
 if __name__ == "__main__":

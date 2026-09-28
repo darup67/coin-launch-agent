@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>com.dhruv.coinlaunch.plus50</string>
+	<key>ProcessType</key><string>Background</string>
+	<key>ProgramArguments</key>
+	<array><string>/Users/dhruvpatel/.venvs/market-ml/bin/python</string><string>-u</string><string>/Users/dhruvpatel/coin-launch-agent/plus50.py</string><string>score</string></array>
+	<key>WorkingDirectory</key><string>/Users/dhruvpatel/coin-launch-agent</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>DYLD_FALLBACK_LIBRARY_PATH</key><string>/Users/dhruvpatel/.venvs/market-ml/lib/python3.11/site-packages/torch/lib</string>
+		<key>PATH</key><string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>TOKENIZERS_PARALLELISM</key><string>false</string>
+	</dict>
+	<key>StartCalendarInterval</key>
+	<array><dict><key>Minute</key><integer>2</integer></dict><dict><key>Minute</key><integer>7</integer></dict><dict><key>Minute</key><integer>12</integer></dict><dict><key>Minute</key><integer>17</integer></dict><dict><key>Minute</key><integer>22</integer></dict><dict><key>Minute</key><integer>27</integer></dict><dict><key>Minute</key><integer>32</integer></dict><dict><key>Minute</key><integer>37</integer></dict><dict><key>Minute</key><integer>42</integer></dict><dict><key>Minute</key><integer>47</integer></dict><dict><key>Minute</key><integer>52</integer></dict><dict><key>Minute</key><integer>57</integer></dict></array>
+	<key>StandardOutPath</key><string>/Users/dhruvpatel/coin-launch-agent/plus50.out.log</string>
+	<key>StandardErrorPath</key><string>/Users/dhruvpatel/coin-launch-agent/plus50.err.log</string>
+</dict>
+</plist>

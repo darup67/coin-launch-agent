@@ -1,5 +1,5 @@
 {
-  "trained": "2026-09-26T10:02:05.240760+00:00",
+  "trained": "2026-09-28T18:31:25.160943+00:00",
   "label": "hold2x",
   "features": [
     "age_min",
@@ -33,48 +33,48 @@
   ],
   "gate": 0.05,
   "gate_test": {
-    "n": 972,
-    "hit": 0.08641975308641975,
-    "median_end_mult": 0.45783370933860373,
-    "mean_end_mult": 0.8238071653433768
+    "n": 4493,
+    "hit": 0.22546182951257512,
+    "median_end_mult": 0.08365260744089767,
+    "mean_end_mult": 1.0837557197989898
   },
   "metrics_test": {
     "AutoGluon + Chronos-2": {
-      "auc": 0.7202,
-      "top1": 0.1053,
-      "top3": 0.0996,
-      "tick_base": 0.0486,
-      "top1_end_median": 0.4573,
-      "top1_end_mean": 0.961
+      "auc": 0.7514,
+      "top1": 0.3511,
+      "top3": 0.3203,
+      "tick_base": 0.1405,
+      "top1_end_median": 1.2248,
+      "top1_end_mean": 1.3053
     },
     "AutoGluon, no Chronos": {
-      "auc": 0.7328,
-      "top1": 0.1287,
-      "top3": 0.1172,
-      "tick_base": 0.0486,
-      "top1_end_median": 0.2904,
-      "top1_end_mean": 1.132
+      "auc": 0.752,
+      "top1": 0.2908,
+      "top3": 0.2967,
+      "tick_base": 0.1405,
+      "top1_end_median": 1.0787,
+      "top1_end_mean": 1.0989
     },
     "Chronos-2 alone (q90 best)": {
-      "auc": 0.6945,
-      "top1": 0.0936,
-      "top3": 0.0957,
-      "tick_base": 0.0486,
-      "top1_end_median": 0.0638,
-      "top1_end_mean": 0.6875
+      "auc": 0.6194,
+      "top1": 0.1383,
+      "top3": 0.1537,
+      "tick_base": 0.1405,
+      "top1_end_median": 0.0391,
+      "top1_end_mean": 0.8082
     },
     "15-min momentum": {
-      "auc": 0.5995,
-      "top1": 0.0526,
-      "top3": 0.0664,
-      "tick_base": 0.0486,
-      "top1_end_median": 1.0175,
-      "top1_end_mean": 0.8995
+      "auc": 0.6576,
+      "top1": 0.1879,
+      "top3": 0.2411,
+      "tick_base": 0.1405,
+      "top1_end_median": 1.0456,
+      "top1_end_mean": 1.1157
     }
   },
-  "base_rate_test": 0.04864864864864865,
-  "coins": 1565,
-  "rows": 18483,
+  "base_rate_test": 0.14049685011292048,
+  "coins": 2889,
+  "rows": 39034,
   "min_mc": 75000,
   "max_age_min": 240,
   "horizon_min": 60,

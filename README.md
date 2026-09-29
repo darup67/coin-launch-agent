@@ -226,3 +226,16 @@ DexScreener budget). Nothing changes alerts, the digest or model picks.
 
 Wait for ~100+ outcomes before acting. `data/jev.jsonl` and `data/jev_outcomes.jsonl`
 hold the raw records. No API key means it does nothing.
+
+## Disk footprint and backup (2026-09-29)
+
+| What | Local rule | Backup |
+|---|---|---|
+| Pre-graduation snapshots | one atomic gzip per scan, packed into one `snaps/<day>.jsonl.gz` per finished day (level 9, ~4x smaller), kept 14 days | none needed (regenerable in about a day) |
+| Candle cache (`data/pump/candles`) | finished days packed into `archive/candles/<day>.jsonl.gz` after 3 days; raw files deleted 14 days later, only after the archive is read back | **git** (`archive/`, ~1 MB/day, immutable, one commit a day). `python3 prelaunch.py restore [YYYY-MM-DD]` puts files back for retraining |
+| Labels | kept forever | `archive/labels.json`, committed with the candle archive |
+| Stage B model | re-fit weekly (or when stage B is live), not nightly | n/a |
+| Logs / screenshots | `market-lab/ops/sweep.py` daily: logs over 1.5 MB cut to the last 300 KB; TradingView screenshots older than 3 days deleted | n/a |
+
+`python3 prelaunch.py backup` = pack + commit + push `archive/` only. The watchdog starts `sweep.py` once a day after 03:00 and warns if the
+last sweep is 2+ days old or a push failed. `http.postBuffer` is set to 100 MB (GitHub answered HTTP 400 to pushes over 1 MB without it).

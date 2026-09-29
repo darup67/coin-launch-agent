@@ -286,6 +286,16 @@ class Watcher:
             f"{self.cfg['max_age_hours']}h" + (" (first start: seeding, no banners)" if self.seeding else ""))
         while True:
             now = time.time()
+            if not self.cfg.get("pump_watch", True):          # paused 2026-09-29: only new Coinbase listings are watched
+                try:
+                    if self.cfg.get("coinbase_listings", True) and now - self.last_cb >= 300:
+                        self.last_cb = now
+                        self.coinbase()
+                        save(STATE, {"alerted": self.alerted, "cb_bases": sorted(self.cb_bases), "digest": self.digest})
+                except Exception as e:
+                    log(f"cycle error: {e!r}")
+                time.sleep(30)
+                continue
             try:
                 if now - self.last_intake >= INTAKE_EVERY:
                     self.last_intake = now
@@ -531,6 +541,10 @@ def main():
         cfg["alerts"] = {k: False for k in cfg["alerts"]}
         cfg["email_digest"] = {"enabled": False}
     if "--run" in sys.argv:
+        if cfg.get("pump_watch", True):                    # only scan blockchains Coinbase / Robinhood support
+            import listed
+            ok = listed.allowed_chains()
+            cfg["networks"] = [n for n in cfg["networks"] if n in ok]
         Watcher(cfg).run()
     elif "--test-digest" in sys.argv:
         hits = load(STATE, {}).get("digest", [])
@@ -541,8 +555,13 @@ def main():
         print("sent")
     elif "--all" in sys.argv:
         show_board(cfg)
-    else:
+    elif "--pump" in sys.argv:
         show_picks(cfg)
+    else:
+        import listed
+        listed.show()
+        print("\nPump.fun / DEX launches are hidden: none of the tokens tracked so far is listed on Coinbase or Robinhood, so none can be "
+              "bought there. `agent.py --pump` shows the old (paused) boards; `listed.py check <address>` tests one token.")
 
 
 if __name__ == "__main__":

@@ -256,3 +256,12 @@ address inside Coinbase Wallet's browser. Coinbase has no per-token page for onc
 launches use custom curves with a few SOL of virtual reserves (Quine: 2.4 SOL virtual, ~1 SOL to finish), so their progress % is not comparable and
 graduating means little. Both are model features (stage A), and `agent.py` ranks standard curves first and flags the rest with a warning.
 
+
+## 2026-09-29 (evening): Coinbase / Robinhood only
+The user trades only through Coinbase and Robinhood, so the detector's default view (`agent.py`) is now `listed.py`'s board: tokens listed on Coinbase
+(online spot product) or Robinhood that are **A** rising fast and steadily and **B** holding the gain (thresholds under `listed` in config.json).
+- Venue check is by contract address (Coinbase `/currencies` gives Solana/Base addresses), never by ticker. Robinhood-only assets are matched by ticker AND name via CoinGecko.
+- Blockchain check: tokens must live on a chain Coinbase supports (63 networks from its API) or Robinhood's own chain; `listed.py chains` prints them, config `listed.allowed_chains` narrows the list. Assets whose chain cannot be verified are excluded and named on the board.
+- Data: trade-core's 15-minute bar store (no price API calls); market cap from DexScreener. LaunchAgent `com.dhruv.coinlaunch.listed` scans at :08 :23 :38 :53.
+- **Paused** (config `pump_watch: false`): none of 1,636 tracked pump.fun coins or 1,031 DEX-watcher tokens is listed on either exchange. The pre-graduation collector, plus50 and their trainers were unloaded (plists renamed `*.disabled` in ~/Library/LaunchAgents), 124 MB of their data was backed up to `data/_pruned_2026-09-29.tgz` (deleted by the daily sweep after 7 days) and removed, and the 230 graduation labels were saved to `archive/labels.json` in git. Resume: set `pump_watch` true, rename the plists back, `launchctl bootstrap gui/$(id -u) <plist>`.
+- `agent.py --pump` = old boards, `listed.py check <address>` = is this token supported.

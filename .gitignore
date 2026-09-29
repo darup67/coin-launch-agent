@@ -5,3 +5,4 @@ data/
 models/*
 !models/meta.json
 !models/plus50_meta.json
+!models/pre_meta.json

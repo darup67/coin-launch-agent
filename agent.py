@@ -443,7 +443,7 @@ def show_base():
     print(f"\n🔵 Base watch (holder data being collected for a future model; {len(bb['rows'])} of {bb['candidates']} candidates measured):")
     for r in sorted(bb["rows"], key=lambda r: r.get("top1_share", 1))[:6]:
         print(f"   {(r.get('symbol') or '?')[:12]:<12} ${r['mc']:>10,.0f} mc  liq ${r['liq']:>8,.0f}  {r['age_min']:>4.0f}m old  holders {r.get('holders', '?'):>5}  "
-              f"top1 {100*r.get('top1_share', 0):3.0f}%  next5 {100*r.get('top5_ex1_share', 0):3.0f}%  transfers/5m {r.get('transfers_5m', '?'):>3}  renounced {r.get('owner_renounced', '?')}")
+              f"top1 {100*r.get('top1_share', 0):3.0f}%  next5 {100*r.get('top5_ex1_share', 0):3.0f}%  transfers/5m {r.get('transfers_5m', '?'):>3}  renounced {r.get('owner_renounced', '?')}\n{feeds.links_line('base', r['token'])}")
 
 
 def show_prelaunch():
@@ -466,11 +466,13 @@ def show_prelaunch():
                 fs = f"{int(100*r['fail_share']):>2}%" if r["fail_share"] is not None else " ?"
                 print(f"   {r['symbol'][:12]:<12} curve {100*r['curve']:5.1f}%  ${r['mc']:>7,}  {r['age_min']:>4.0f}m old  trades/5m {tr:>4}  "
                       f"failed txs {fs}  15m {r['ret_15m']:+.2f}  socials {r['socials']}  {r['mint']}")
+                print(feeds.links_line("solana", r["mint"]))
         else:
             rows = sorted(b["rows"], key=lambda r: -r["ret_15m"])[:6]
             print("   Movers right now (NOT a prediction: sorted by 15-min move):")
             for r in rows:
                 print(f"   {r['symbol'][:12]:<12} ${r['mc']:>7,}  {r['age_min']:>4.0f}m old  15m {r['ret_15m']:+.2f}  5m vol ${r['vol_5m']:,}  socials {r['socials']}  creator's past graduates {r['creator_prior_grads']}  {r['mint']}")
+                print(feeds.links_line("solana", r["mint"]))
         gr = cv.get("graduated", [])
         if gr:
             seen = [g for g in gr if g.get("watched")]
@@ -485,6 +487,7 @@ def show_prelaunch():
         pg = f"P(grad) {r['p_grad']:.0%}" if r["p_grad"] is not None else ""
         pe = f"P(explode|grad) {r['p_explode']:.0%}" if r["p_explode"] is not None else ""
         print(f"   {r['symbol'][:12]:<12} score {r['score']:.1%}  {pg} {pe}  ${r['mc']:>7,}  {r['age_min']:.0f}m old  {r['mint']}")
+        print(feeds.links_line("solana", r["mint"]))
 
 
 def show_picks(cfg):
@@ -509,7 +512,7 @@ def show_picks(cfg):
                else "1h result pending")
         now_mc = f"now {money(r['mc_now'])}" if r.get("mc_now") else ""
         print(f"🎯 {r['symbol'][:12]:<12} P {r['p']:.0%}  added {datetime.fromtimestamp(r['t_entry'] / 1000):%H:%M} at "
-              f"{money(r['entry_mc'])}  {now_mc:<12} {res}\n   {r['token']}")
+              f"{money(r['entry_mc'])}  {now_mc:<12} {res}\n   {r['token']}\n{feeds.links_line('solana', r['token'])}")
     show_prelaunch()
     rec = d["live_record"]
     print(f"\nHidden: {len(day) - len(picks)} other coins added in the last 24h. "

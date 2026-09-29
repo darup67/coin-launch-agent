@@ -245,3 +245,8 @@ last sweep is 2+ days old or a push failed. `http.postBuffer` is set to 100 MB (
 score, which left this list empty). `agent.py` ranks it by curve progress. A coin counts as a fresh graduation only if the scan watched its curve go
 from incomplete to complete (`watched: true`); coins first read already complete are reported separately. Market caps after migration are meaningless
 (the curve empties); the on-chain `complete` flag is the truth. `trades/5m` and `failed txs` show `?` when the public RPC skipped that call.
+
+## Links per candidate (2026-09-29)
+Every candidate row in `agent.py` (picks, closest-to-graduating, movers, ranked board, Base watch) and the +50% pick email now carries `feeds.links()`:
+DexScreener chart, Pump.fun coin page (Solana), and a Coinbase Wallet deep link (`go.cb-w.com/dapp?cb_url=…`) that opens Jupiter (Solana) or Uniswap (Base) for that
+address inside Coinbase Wallet's browser. Coinbase has no per-token page for onchain coins. Opening a link places no order.

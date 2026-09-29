@@ -457,17 +457,27 @@ def show_prelaunch():
     if not meta.get("a_active") and not meta.get("b_active"):
         print(f"\n🔮 Pre-graduation watch: NO RANKING YET. The graduation model needs live labels (a coin's outcome is known 4h+ after launch): "
               f"{labeled} coins labeled so far, first training tomorrow 06:30. The explode-after-graduation model failed its held-out test (AUC {meta.get('trained', {}).get('b', {}).get('auc_test', 0):.2f}) and is off.")
-        rows = [r for r in b["rows"] if r.get("curve") is not None]
+        cv = load(os.path.join(DATA, "pre", "curves.json"), {"coins": {}, "graduated": []})
+        rows = sorted(cv["coins"].values(), key=lambda r: -r["curve"])[:8]
         if rows:
-            print("   Closest to graduating right now (bonding-curve progress read from the chain; a fact, NOT a prediction):")
-            for r in sorted(rows, key=lambda r: -r["curve"])[:8]:
-                print(f"   {r['symbol'][:12]:<12} curve {100*r['curve']:5.1f}%  ${r['mc']:>7,}  {r['age_min']:>4.0f}m old  trades/5m {r['trades_5m'] if r['trades_5m'] is not None else '?':>4}  "
-                      f"failed txs {int(100*(r['fail_share'] or 0)):>2}%  15m {r['ret_15m']:+.2f}  socials {r['socials']}  {r['mint']}")
+            print(f"   Closest to graduating right now (bonding-curve progress read from the chain, {len(cv['coins'])} coins read in the last 30 min; a fact, NOT a prediction):")
+            for r in rows:
+                tr = r["trades_5m"] if r["trades_5m"] is not None else "?"
+                fs = f"{int(100*r['fail_share']):>2}%" if r["fail_share"] is not None else " ?"
+                print(f"   {r['symbol'][:12]:<12} curve {100*r['curve']:5.1f}%  ${r['mc']:>7,}  {r['age_min']:>4.0f}m old  trades/5m {tr:>4}  "
+                      f"failed txs {fs}  15m {r['ret_15m']:+.2f}  socials {r['socials']}  {r['mint']}")
         else:
             rows = sorted(b["rows"], key=lambda r: -r["ret_15m"])[:6]
             print("   Movers right now (NOT a prediction: sorted by 15-min move):")
             for r in rows:
                 print(f"   {r['symbol'][:12]:<12} ${r['mc']:>7,}  {r['age_min']:>4.0f}m old  15m {r['ret_15m']:+.2f}  5m vol ${r['vol_5m']:,}  socials {r['socials']}  creator's past graduates {r['creator_prior_grads']}  {r['mint']}")
+        gr = cv.get("graduated", [])
+        if gr:
+            seen = [g for g in gr if g.get("watched")]
+            hr = [g for g in seen if time.time() * 1000 - g["t"] < 3600_000]
+            print(f"   Graduated on-chain, last 24h: {len(seen)} watched crossing the line ({len(hr)} in the last hour"
+                  + (": " + ", ".join(f"{g['symbol']} ({g['mins_after_launch']:.0f}m old)" for g in hr[:6]) if hr else "")
+                  + f"), {len(gr) - len(seen)} more already complete when first read")
         show_base()
         return
     print(f"\n🔮 Pre-graduation watch (most likely to graduate{' and explode' if meta.get('b_active') else ''}), {dur(time.time() - b['updated'])} ago:")

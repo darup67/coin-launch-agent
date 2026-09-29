@@ -55,8 +55,13 @@ def used():
 
 
 def _count(n=1):
-    with open(BUDGET, "w") as f:
-        json.dump({"month": _month(), "used": used() + n, "cap": MONTHLY_CAP, "updated": datetime.now().isoformat(timespec="seconds")}, f)
+    # Read the old total BEFORE opening for write: open(..., "w") truncates the file, so reading inside
+    # the with-block always saw 0 and the counter never passed 1 (bug found 2026-09-29).
+    total = used() + n
+    tmp = BUDGET + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"month": _month(), "used": total, "cap": MONTHLY_CAP, "updated": datetime.now().isoformat(timespec="seconds")}, f)
+    os.replace(tmp, BUDGET)
 
 
 class BudgetExceeded(RuntimeError):

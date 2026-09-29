@@ -26,7 +26,7 @@ from datetime import datetime
 
 import numpy as np
 
-import ml, pump
+import ml, onchain, pump
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRE = os.path.join(HERE, "data", "pre")
@@ -126,6 +126,11 @@ CANDLE_KEYS = list(candle_features({"close": np.array([6e3, 7e3]), "high": np.ar
                                     "t0": 0, "first_open": 3e3}, 1, 0).keys())
 STATIC_KEYS = list(static_features({}, 0).keys())
 FEATURES = CANDLE_KEYS + STATIC_KEYS
+# Free on-chain features (onchain.py), available for live snapshots only (no history to backfill): used by stage A.
+ONCHAIN_KEYS = ["curve_progress", "curve_sol", "n_trades", "n_trades_5m", "n_trades_15m", "fail_share", "first_slot_txs",
+                "unique_slots", "creator_share", "creator_sold", "mint_authority", "freeze_authority", "n_extensions",
+                "creator_txs", "creator_wallet_age_h", "oc_age_min"]
+FEATURES_A = FEATURES + ONCHAIN_KEYS
 
 
 # ---------------------------------------------------------------- discovery
@@ -159,19 +164,89 @@ def list_newest(budget_s=150):
     return out
 
 
+def refresh_onchain(coins, mints, budget_s=70):
+    """Free Solana on-chain features for tracked coins, stalest first, within a time budget (the public RPC is
+    paced to ~4.5 calls/s; 3 dynamic calls per coin plus 2 static calls the first time we see it)."""
+    todo = [m for m in mints if coins[m]["meta"].get("bonding_curve")]
+    todo.sort(key=lambda m: coins[m].get("oc_t", 0))
+    deadline = time.time() + budget_s
+
+    def one(m):
+        if time.time() > deadline:
+            return
+        c = coins[m]
+        meta = {**c["meta"], "mint": m}
+        try:
+            if "oc_static" not in c:
+                c["oc_static"] = onchain.solana_static(meta)
+            dyn = onchain.solana_dynamic(meta, c["created"], c.get("oc_dyn"))
+            if dyn:
+                c["oc_dyn"] = dyn
+                c["oc_t"] = int(time.time() * 1000)
+        except Exception:
+            pass
+
+    with ThreadPoolExecutor(4) as ex:
+        list(ex.map(one, todo))
+
+
+def oc_features(c, now_ms):
+    f = {**(c.get("oc_static") or {}), **(c.get("oc_dyn") or {})}
+    out = {k: f[k] for k in ONCHAIN_KEYS if k in f}
+    if c.get("oc_t"):
+        out["oc_age_min"] = max(0.0, (now_ms - c["oc_t"]) / 60000)
+    return out
+
+
+TRACKED = os.path.join(HERE, "data", "tracked.json")     # written by the coin watcher (agent.py)
+BASE_SNAPS = os.path.join(PRE, "base_snapshots.jsonl")
+BASE_BOARD = os.path.join(PRE, "base_board.json")
+
+
+def base_tick(now_ms, budget_s=25):
+    """Base coins the watcher already tracks: holder distribution from free Base RPC logs. Data collection only
+    (Base has no bonding-curve graduation event, so there's no label or model yet). Applies the watcher's own
+    sanity filters: no clone tokens with fake caps (cap/liquidity > 100) or under $8k liquidity."""
+    t = load(TRACKED, {})
+    cands = []
+    for x in t.get("tokens", []):
+        if x.get("net") != "base" or not x.get("launch") or x.get("why"):
+            continue
+        age = now_ms / 60000 - x["launch"] / 60
+        mc, liq = x.get("mc") or 0, x.get("liq") or 0
+        if 5 <= age <= 180 and mc >= 5000 and liq >= 8000 and mc / max(liq, 1) <= 100:
+            cands.append((x, age))
+    cands.sort(key=lambda z: -(z[0].get("mc") or 0))
+    deadline = time.time() + budget_s
+    rows = []
+    for x, age in cands[:40]:
+        if time.time() > deadline:
+            break
+        f = onchain.base_features(x["token"], x["launch"] * 1000)
+        if f:
+            rows.append({"token": x["token"], "symbol": x.get("symbol"), "t": int(now_ms), "age_min": round(age, 1),
+                         "mc": x.get("mc"), "liq": x.get("liq"), **f})
+    if rows:
+        with open(BASE_SNAPS, "a") as fh:
+            for r in rows:
+                fh.write(json.dumps(r) + "\n")
+    save(BASE_BOARD, {"updated": time.time(), "candidates": len(cands), "rows": rows})
+    return len(rows)
+
+
 def tick():
     import faulthandler
     faulthandler.dump_traceback_later(270, exit=True)
     t0 = time.time(); now_ms = t0 * 1000
     coins = load(COINS, {})
-    listing = list_newest()
+    listing = list_newest(budget_s=100)
     found = 0
     for c in listing:
         age = (now_ms - c["created_timestamp"]) / 60000
         if c["mint"] in coins or (c.get("usd_market_cap") or 0) < MIN_TRACTION_USD or age > 45:
             continue
         coins[c["mint"]] = {"created": c["created_timestamp"], "symbol": c.get("symbol"), "name": c.get("name"), "first_seen": now_ms,
-                            "meta": {k: c.get(k) for k in ("creator", "description", "name", "symbol", "twitter", "website", "telegram")},
+                            "meta": {**{k: c.get(k) for k in ("creator", "description", "name", "symbol", "twitter", "website", "telegram", "bonding_curve")}, "mint": c["mint"]},
                             "first_mc": c.get("usd_market_cap"), "replies": c.get("reply_count")}
         found += 1
     # snapshot every tracked coin that is still in its window
@@ -193,9 +268,10 @@ def tick():
 
     with ThreadPoolExecutor(12) as ex:
         res = [r for r in ex.map(one, active) if r]
+    refresh_onchain(coins, [m for m, _, _ in res])
     rows = []
     for m, f, mc in res:
-        rows.append({"mint": m, "t": int(now_ms), "mc": mc, **f})
+        rows.append({"mint": m, "t": int(now_ms), "mc": mc, **f, **oc_features(coins[m], now_ms)})
     if rows:
         with open(SNAPS, "a") as f:
             for r in rows:
@@ -207,8 +283,9 @@ def tick():
             coins[r["mint"]]["picked"] = {"t": int(now_ms), "mc": r["mc"], "score": r["score"]}
     save(COINS, coins)
     resolved = resolve(coins, now_ms)
+    n_base = base_tick(now_ms)
     log(f"listing {len(listing)} · new tracked {found} · tracking {len(coins)} · snapshots {len(rows)} · "
-        f"board {len(board)} · resolved {resolved} · {time.time() - t0:.0f}s")
+        f"board {len(board)} · onchain {sum(1 for r in rows if 'curve_progress' in r)}/{len(rows)} · base {n_base} · resolved {resolved} · {time.time() - t0:.0f}s")
 
 
 # ---------------------------------------------------------------- labels
@@ -307,6 +384,9 @@ def score_board(rows, coins):
     meta = load(META, {})
     pa = _predictor(MODEL_A) if meta.get("a_active") else None
     pb = _predictor(MODEL_B) if meta.get("b_active") else None
+    for k in meta.get("features_a", []):
+        if k not in df.columns:
+            df[k] = np.nan
     df["p_grad"] = pa.predict_proba(df[meta["features_a"]])[1].values if pa is not None else np.nan
     df["p_explode"] = pb.predict_proba(df[meta["features_b"]])[1].values if pb is not None else np.nan
     # unconditional score when both exist; else the stage that exists
@@ -321,6 +401,9 @@ def score_board(rows, coins):
                     "p_grad": None if np.isnan(r.p_grad) else round(float(r.p_grad), 4),
                     "p_explode": None if np.isnan(r.p_explode) else round(float(r.p_explode), 4),
                     "ret_15m": round(float(r.ret_15m), 3), "vol_5m": round(math.expm1(float(r.log_vol_5m))),
+                    "curve": None if "curve_progress" not in r or np.isnan(r.get("curve_progress", np.nan)) else round(float(r["curve_progress"]), 3),
+                    "trades_5m": None if "n_trades_5m" not in r or np.isnan(r.get("n_trades_5m", np.nan)) else int(r["n_trades_5m"]),
+                    "fail_share": None if "fail_share" not in r or np.isnan(r.get("fail_share", np.nan)) else round(float(r["fail_share"]), 2),
                     "creator_prior_grads": int(r.creator_prior_grads), "socials": int(r.has_twitter + r.has_website + r.has_telegram)})
     save(BOARD, {"updated": time.time(), "a_ready": pa is not None, "b_ready": pb is not None, "rows": out,
                  "labeled": len(load(LABELS, {}))})
@@ -438,17 +521,24 @@ def train():
     meta["trained"]["b"] = {"at": datetime.now(timezone.utc).isoformat(), "rows": len(db), "auc_val": _auc(va.y, pv), "auc_test": _auc(te.y, pt), "base_test": float(te.y.mean())}
     # ---- stage A (when live labels suffice)
     da = build_a()
+    if len(da) and "curve_progress" in da.columns:
+        with_oc = da[da.curve_progress.notna()]
+        if int(with_oc.y.sum()) >= MIN_A_POS and (len(with_oc) - int(with_oc.y.sum())) >= MIN_A_POS:
+            da = with_oc                      # enough labeled snapshots that carry the on-chain features: use only those
+    for k in FEATURES_A:
+        if len(da) and k not in da.columns:
+            da[k] = np.nan
     npos = int(da.y.sum()) if len(da) else 0
     lines += ["", "## Stage A: P(graduate)", ""]
     if npos >= MIN_A_POS and (len(da) - npos) >= MIN_A_POS:
         tr, va, te = _split(da)
-        pa = _fit(tr, FEATURES, MODEL_A, 240)
-        pv, pt = pa.predict_proba(va[FEATURES])[1].values, pa.predict_proba(te[FEATURES])[1].values
+        pa = _fit(tr, FEATURES_A, MODEL_A, 240)
+        pv, pt = pa.predict_proba(va[FEATURES_A])[1].values, pa.predict_proba(te[FEATURES_A])[1].values
         lines += [f"Rows {len(da)} live snapshots from {da.mint.nunique()} coins; graduate base {da.y.mean():.1%}. AUC val {_auc(va.y, pv):.3f}, **test {_auc(te.y, pt):.3f}**."]
         a_ok = _auc(te.y, pt) >= MIN_AUC
         lines += ["", f"**Stage A is {'ACTIVE' if a_ok else 'OFF'}** (needs test AUC >= {MIN_AUC})."]
         meta["a_active"] = bool(a_ok)
-        meta["features_a"] = FEATURES
+        meta["features_a"] = FEATURES_A
         meta["trained"]["a"] = {"at": datetime.now(timezone.utc).isoformat(), "rows": len(da), "pos": npos, "auc_val": _auc(va.y, pv), "auc_test": _auc(te.y, pt), "base_test": float(te.y.mean())}
     else:
         lines += [f"Not trained yet: {npos} graduate positives among {len(da)} labeled live snapshots (needs {MIN_A_POS}+ of each class). "

@@ -122,3 +122,23 @@ def coinbase_products():
     with urllib.request.urlopen(urllib.request.Request(
             "https://api.exchange.coinbase.com/products", headers=UA), timeout=15) as r:
         return {p["id"]: p for p in json.load(r)}
+
+
+def links(chain, addr):
+    """Clickable places to look at / trade one candidate (built from the address only; none of these calls a paid API).
+    DexScreener: chart + pools. Pump.fun: the coin page (where a pre-graduation coin actually trades). Coinbase Wallet:
+    opens the swap page inside Coinbase Wallet's dapp browser (Jupiter on Solana, Uniswap on Base); Coinbase has no
+    per-token page for onchain coins, so this is the way to reach one from Coinbase. Opening a link trades nothing."""
+    from urllib.parse import quote
+    if chain == "base":
+        swap = f"https://app.uniswap.org/swap?chain=base&outputCurrency={addr}"
+        out = {"DexScreener": f"https://dexscreener.com/base/{addr}"}
+    else:
+        swap = f"https://jup.ag/swap/SOL-{addr}"
+        out = {"DexScreener": f"https://dexscreener.com/solana/{addr}", "Pump.fun": f"https://pump.fun/coin/{addr}"}
+    out["Coinbase Wallet"] = "https://go.cb-w.com/dapp?cb_url=" + quote(swap, safe="")
+    return out
+
+
+def links_line(chain, addr, indent="   "):
+    return indent + "🔗 " + " · ".join(f"{k} {v}" for k, v in links(chain, addr).items())

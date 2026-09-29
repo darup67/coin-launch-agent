@@ -335,7 +335,7 @@ def email_picks(picks, st, meta):
     gt = meta.get("gate_test") or {}
     lines = [f"{j['symbol']}  P(+50% in 1h) {j['p']:.0%}  added at ${j['entry_mc'] / 1000:,.0f}k  "
              f"{datetime.fromtimestamp(j['t_entry'] / 1000):%I:%M %p}\n    contract {tok}\n"
-             f"    https://dexscreener.com/solana/{tok}\n" for tok, j in picks]
+             f"{agent.feeds.links_line('solana', tok, '    ')}\n" for tok, j in picks]
     body = (f"Coins with a good chance of +50% one hour after being added. On held-out coins, picks at this "
             f"score hit +50% {gt.get('hit') or 0:.0%} of the time (base rate {meta.get('base_rate_test') or 0:.0%}); "
             f"median 1h multiple {gt.get('median_end_mult') or 0:.2f}x, before fees and slippage.\n\n" + "\n".join(lines) +

@@ -410,6 +410,39 @@ def score_board(rows, coins):
     return out
 
 
+# ---------------------------------------------------------------- retention
+KEEP_SNAP_DAYS, KEEP_COIN_DAYS = 14, 3
+
+
+def prune():
+    """Bound local disk use (snapshots grew ~64 MB/day, 876 bytes/row, and coins.json never shrank): keep 14 days of
+    snapshots (stage A trains on recent behaviour anyway), 30 days of Base snapshots, and drop coins from
+    coins.json 3 days after they are labeled (labels themselves are tiny and stay). Run nightly with training."""
+    now = time.time() * 1000
+    stats = {}
+    for path, days in ((SNAPS, KEEP_SNAP_DAYS), (BASE_SNAPS, 30)):
+        if not os.path.exists(path):
+            continue
+        cut, kept, total = now - days * 86400_000, 0, 0
+        tmp = path + ".tmp"
+        with open(path) as fin, open(tmp, "w") as fout:
+            for line in fin:
+                total += 1
+                try:
+                    if json.loads(line)["t"] >= cut:
+                        fout.write(line); kept += 1
+                except Exception:
+                    pass
+        os.replace(tmp, path)
+        stats[os.path.basename(path)] = f"{kept}/{total}"
+    coins, labels = load(COINS, {}), load(LABELS, {})
+    keep = {m: c for m, c in coins.items()
+            if not (m in labels and now - c["created"] > KEEP_COIN_DAYS * 86400_000 and (not c.get("picked") or c.get("ledgered")))}
+    save(COINS, keep)
+    stats["coins.json"] = f"{len(keep)}/{len(coins)}"
+    log("prune kept " + ", ".join(f"{k} {v}" for k, v in stats.items()))
+
+
 # ---------------------------------------------------------------- training
 def _fit(df, feats, path, seconds):
     """AutoGluon fit into path.new, swapped in only if it produced models. Folds are hashed from the coin id
@@ -496,6 +529,7 @@ def _split(df):
 
 def train():
     from datetime import timezone
+    prune()
     meta = load(META, {"trained": {}})
     lines = [f"# Pre-graduation models: {datetime.now():%Y-%m-%d %H:%M} ET", ""]
     # ---- stage B (now)
@@ -557,6 +591,8 @@ if __name__ == "__main__":
         tick()
     elif cmd == "train":
         train()
+    elif cmd == "prune":
+        prune()
     elif cmd == "board":
         b = load(BOARD, None)
         print(json.dumps(b, indent=1)[:4000] if b else "no board yet")

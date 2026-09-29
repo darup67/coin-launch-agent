@@ -31,7 +31,8 @@ import ml, onchain, pump
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRE = os.path.join(HERE, "data", "pre")
 COINS = os.path.join(PRE, "coins.json")            # tracked coins: static meta + snapshot bookkeeping
-SNAPS = os.path.join(PRE, "snapshots.jsonl")       # one row per (coin, tick): features + ids
+SNAPS = os.path.join(PRE, "snapshots.jsonl")       # LEGACY single file (migrated into SNAP_DIR on first use)
+SNAP_DIR = os.path.join(PRE, "snaps")              # one gzip file per UTC day, one row per (coin, tick): features + ids
 LABELS = os.path.join(PRE, "labels.json")          # mint -> {"grad": 0/1, "explode": 0/1/None, "resolved_at": ms}
 BOARD = os.path.join(PRE, "board.json")
 MODELS = os.path.join(HERE, "models")
@@ -68,6 +69,95 @@ def save(path, obj):
     with open(tmp, "w") as f:
         json.dump(obj, f)
     os.replace(tmp, path)
+
+
+# ---------------------------------------------------------------- snapshot storage
+import glob, gzip, shutil, zlib
+
+
+def _day(t_ms):
+    return time.strftime("%Y-%m-%d", time.gmtime(t_ms / 1000))
+
+
+def write_snaps(rows):
+    """One small gzip per scan, written to a temp file and renamed into place, so a crash can never leave a torn
+    file (appending to a shared gzip lets one torn write make the rest of the day unreadable). Older days are
+    packed into a single tighter file by pack_old(). Layout: snaps/<day>/<HHMMSS>.jsonl.gz and snaps/<day>.jsonl.gz."""
+    by = {}
+    for r in rows:
+        by.setdefault(_day(r["t"]), []).append(r)
+    stamp = time.strftime("%H%M%S", time.gmtime())
+    for day, rs in by.items():
+        d = os.path.join(SNAP_DIR, day)
+        os.makedirs(d, exist_ok=True)
+        path, i = os.path.join(d, stamp + ".jsonl.gz"), 0
+        while os.path.exists(path):
+            i += 1
+            path = os.path.join(d, f"{stamp}-{i}.jsonl.gz")
+        tmp = path + ".tmp"
+        with gzip.open(tmp, "wb", compresslevel=6) as f:
+            f.write(("\n".join(json.dumps(r) for r in rs) + "\n").encode())
+        os.replace(tmp, path)
+
+
+def _read_gz(path):
+    try:
+        with gzip.open(path, "rt") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(r, dict) and "mint" in r and "t" in r:      # partial or foreign rows never reach training
+                    yield r
+    except (EOFError, OSError, zlib.error):
+        return          # a damaged file never blocks the rest
+
+
+def iter_snaps():
+    migrate_legacy()
+    for path in sorted(glob.glob(os.path.join(SNAP_DIR, "*.jsonl.gz")) + glob.glob(os.path.join(SNAP_DIR, "*", "*.jsonl.gz"))):
+        yield from _read_gz(path)
+
+
+def pack_old():
+    """Merge each finished day's per-scan files into one file at the highest compression (~2x tighter again)."""
+    today = _day(time.time() * 1000)
+    for d in sorted(glob.glob(os.path.join(SNAP_DIR, "*-*-*"))):
+        if not os.path.isdir(d) or os.path.basename(d) >= today:
+            continue
+        files = sorted(glob.glob(os.path.join(d, "*.jsonl.gz")))
+        rows = [r for f in files for r in _read_gz(f)]
+        out = d + ".jsonl.gz"
+        tmp = out + ".tmp"
+        if os.path.exists(out):                              # merge with an existing packed file for the same day
+            rows = list(_read_gz(out)) + rows
+        with gzip.open(tmp, "wb", compresslevel=9) as f:
+            f.write(("\n".join(json.dumps(r) for r in rows) + "\n").encode())
+        os.replace(tmp, out)
+        shutil.rmtree(d)
+
+
+def migrate_legacy():
+    """One-time: the old single snapshots.jsonl becomes per-day files."""
+    if not os.path.exists(SNAPS):
+        return
+    by = {}
+    with open(SNAPS) as f:
+        for line in f:
+            try:
+                r = json.loads(line)
+                by.setdefault(_day(r["t"]), []).append(r)
+            except (ValueError, KeyError):
+                pass
+    for day, rs in by.items():
+        d = os.path.join(SNAP_DIR, day)
+        os.makedirs(d, exist_ok=True)
+        tmp = os.path.join(d, "legacy.jsonl.gz.tmp")
+        with gzip.open(tmp, "wb", compresslevel=6) as f:
+            f.write(("\n".join(json.dumps(r) for r in rs) + "\n").encode())
+        os.replace(tmp, os.path.join(d, "legacy.jsonl.gz"))
+    os.remove(SNAPS)
 
 
 # ---------------------------------------------------------------- features
@@ -271,11 +361,9 @@ def tick():
     refresh_onchain(coins, [m for m, _, _ in res])
     rows = []
     for m, f, mc in res:
-        rows.append({"mint": m, "t": int(now_ms), "mc": mc, **f, **oc_features(coins[m], now_ms)})
+        rows.append({"mint": m, "t": int(now_ms), "mc": mc, "created": coins[m]["created"], **f, **oc_features(coins[m], now_ms)})
     if rows:
-        with open(SNAPS, "a") as f:
-            for r in rows:
-                f.write(json.dumps(r) + "\n")
+        write_snaps(rows)
     save(COINS, coins)
     board = score_board(rows, coins)
     for r in board[:5]:
@@ -284,6 +372,7 @@ def tick():
     save(COINS, coins)
     resolved = resolve(coins, now_ms)
     n_base = base_tick(now_ms)
+    prune()
     log(f"listing {len(listing)} · new tracked {found} · tracking {len(coins)} · snapshots {len(rows)} · "
         f"board {len(board)} · onchain {sum(1 for r in rows if 'curve_progress' in r)}/{len(rows)} · base {n_base} · resolved {resolved} · {time.time() - t0:.0f}s")
 
@@ -414,18 +503,29 @@ def score_board(rows, coins):
 KEEP_SNAP_DAYS, KEEP_COIN_DAYS = 14, 3
 
 
-def prune():
-    """Bound local disk use (snapshots grew ~64 MB/day, 876 bytes/row, and coins.json never shrank): keep 14 days of
-    snapshots (stage A trains on recent behaviour anyway), 30 days of Base snapshots, and drop coins from
-    coins.json 3 days after they are labeled (labels themselves are tiny and stay). Run nightly with training."""
+def prune(force=False):
+    """Bound local disk use. Snapshots: delete day files older than KEEP_SNAP_DAYS (instant; they are per-day gzips).
+    Base snapshots: 30 days. coins.json: drop coins 3 days after labeling unless a pick still awaits grading (each
+    snapshot row carries its own launch time, so training never needs the dropped entries). Labels stay forever
+    (tiny, and the candles that made them expire after ~3.5 days). Runs every 6 h from the scan and nightly."""
+    marker = os.path.join(PRE, ".pruned")
+    if not force and os.path.exists(marker) and time.time() - os.path.getmtime(marker) < 6 * 3600:
+        return
     now = time.time() * 1000
     stats = {}
-    for path, days in ((SNAPS, KEEP_SNAP_DAYS), (BASE_SNAPS, 30)):
-        if not os.path.exists(path):
-            continue
-        cut, kept, total = now - days * 86400_000, 0, 0
-        tmp = path + ".tmp"
-        with open(path) as fin, open(tmp, "w") as fout:
+    cutoff = time.strftime("%Y-%m-%d", time.gmtime((now - KEEP_SNAP_DAYS * 86400_000) / 1000))
+    migrate_legacy()
+    pack_old()
+    files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.jsonl.gz")))
+    old = [f for f in files if os.path.basename(f)[:10] < cutoff]
+    freed = sum(os.path.getsize(f) for f in old)
+    for f in old:
+        os.remove(f)
+    stats["snaps"] = f"{len(files) - len(old)}/{len(files)} day files (freed {freed / 1e6:.0f} MB)"
+    if os.path.exists(BASE_SNAPS):
+        cut, kept, total = now - 30 * 86400_000, 0, 0
+        tmp = BASE_SNAPS + ".tmp"
+        with open(BASE_SNAPS) as fin, open(tmp, "w") as fout:
             for line in fin:
                 total += 1
                 try:
@@ -433,13 +533,15 @@ def prune():
                         fout.write(line); kept += 1
                 except Exception:
                     pass
-        os.replace(tmp, path)
-        stats[os.path.basename(path)] = f"{kept}/{total}"
+        os.replace(tmp, BASE_SNAPS)
+        stats["base"] = f"{kept}/{total}"
+    stats["candle archive"] = str(archive_candles())
     coins, labels = load(COINS, {}), load(LABELS, {})
     keep = {m: c for m, c in coins.items()
             if not (m in labels and now - c["created"] > KEEP_COIN_DAYS * 86400_000 and (not c.get("picked") or c.get("ledgered")))}
     save(COINS, keep)
     stats["coins.json"] = f"{len(keep)}/{len(coins)}"
+    open(marker, "w").close()
     log("prune kept " + ", ".join(f"{k} {v}" for k, v in stats.items()))
 
 
@@ -505,17 +607,16 @@ def build_a():
     """Stage A rows from our live snapshots joined to labels (grad within 4h)."""
     import pandas as pd
     labels, coins = load(LABELS, {}), load(COINS, {})
-    if not os.path.exists(SNAPS):
-        return pd.DataFrame()
     rows = []
-    with open(SNAPS) as f:
-        for line in f:
-            r = json.loads(line)
-            lab = labels.get(r["mint"])
-            if lab is None or lab.get("empty") or r["mint"] not in coins or r["mc"] >= GRAD_MC:
-                continue
-            r["y"] = lab["grad"]; r["created"] = coins[r["mint"]]["created"]
-            rows.append(r)
+    for r in iter_snaps():
+        lab = labels.get(r["mint"])
+        if lab is None or lab.get("empty") or r["mc"] >= GRAD_MC:
+            continue
+        created = r.get("created") or (coins.get(r["mint"]) or {}).get("created")
+        if not created:
+            continue
+        r["y"] = lab["grad"]; r["created"] = created
+        rows.append(r)
     return pd.DataFrame(rows)
 
 
@@ -529,30 +630,36 @@ def _split(df):
 
 def train():
     from datetime import timezone
-    prune()
+    prune(force=True)
     meta = load(META, {"trained": {}})
     lines = [f"# Pre-graduation models: {datetime.now():%Y-%m-%d %H:%M} ET", ""]
-    # ---- stage B (now)
-    db = build_b()
-    tr, va, te = _split(db)
-    log(f"stage B: {len(db)} rows, {db.mint.nunique()} coins, explode base {db.y.mean():.1%} (train {tr.y.mean():.1%} / val {va.y.mean():.1%} / test {te.y.mean():.1%})")
-    pb = _fit(tr, FEATURES, MODEL_B, 240)
-    pv, pt = pb.predict_proba(va[FEATURES])[1].values, pb.predict_proba(te[FEATURES])[1].values
-    lines += ["## Stage B: P(explode | graduates)", "",
-              f"Rows {len(db)} from {db.mint.nunique()} cached graduates (bars 6-120 min old, $5k-$60k, before first $60k close). "
-              f"Explode base rate: train {tr.y.mean():.1%}, val {va.y.mean():.1%}, test {te.y.mean():.1%}. AUC val {_auc(va.y, pv):.3f}, **test {_auc(te.y, pt):.3f}**.", "",
-              "| test predicted | rows | exploded |", "|---|---|---|"]
-    for lo, hi in ((0, .05), (.05, .1), (.1, .2), (.2, .4), (.4, 1.01)):
-        m = (pt >= lo) & (pt < hi)
-        if m.sum():
-            lines.append(f"| {lo:.0%}-{min(hi, 1):.0%} | {m.sum()} | {te.y.values[m].mean():.0%} |")
-    b_ok = _auc(te.y, pt) >= MIN_AUC and int(te.y.sum()) >= 20
-    lines += ["", f"**Stage B is {'ACTIVE' if b_ok else 'OFF'}**: it is used only if test AUC >= {MIN_AUC} with >= 20 positives "
-              f"(test AUC {_auc(te.y, pt):.3f}, {int(te.y.sum())} positive rows). Pre-graduation behaviour told us little about who explodes afterwards; "
-              "the plus50 model handles explosions once a coin reaches $150k."]
-    meta["b_active"] = bool(b_ok)
-    meta["features_b"] = FEATURES
-    meta["trained"]["b"] = {"at": datetime.now(timezone.utc).isoformat(), "rows": len(db), "auc_val": _auc(va.y, pv), "auc_test": _auc(te.y, pt), "base_test": float(te.y.mean())}
+    # ---- stage B: failed its test on 2026-09-29 and is off, so it is re-checked weekly, not nightly (each fit is ~4 CPU-minutes and 74 MB)
+    b_at = (meta.get("trained", {}).get("b") or {}).get("at")
+    b_due = (not b_at) or (time.time() - datetime.fromisoformat(b_at).timestamp() > 7 * 86400) or bool(meta.get("b_active"))
+    if b_due:
+        db = build_b()
+        tr, va, te = _split(db)
+        log(f"stage B: {len(db)} rows, {db.mint.nunique()} coins, explode base {db.y.mean():.1%} (train {tr.y.mean():.1%} / val {va.y.mean():.1%} / test {te.y.mean():.1%})")
+        pb = _fit(tr, FEATURES, MODEL_B, 240)
+        pv, pt = pb.predict_proba(va[FEATURES])[1].values, pb.predict_proba(te[FEATURES])[1].values
+        lines += ["## Stage B: P(explode | graduates)", "",
+                  f"Rows {len(db)} from {db.mint.nunique()} cached graduates (bars 6-120 min old, $5k-$60k, before first $60k close). "
+                  f"Explode base rate: train {tr.y.mean():.1%}, val {va.y.mean():.1%}, test {te.y.mean():.1%}. AUC val {_auc(va.y, pv):.3f}, **test {_auc(te.y, pt):.3f}**.", "",
+                  "| test predicted | rows | exploded |", "|---|---|---|"]
+        for lo, hi in ((0, .05), (.05, .1), (.1, .2), (.2, .4), (.4, 1.01)):
+            m = (pt >= lo) & (pt < hi)
+            if m.sum():
+                lines.append(f"| {lo:.0%}-{min(hi, 1):.0%} | {m.sum()} | {te.y.values[m].mean():.0%} |")
+        b_ok = _auc(te.y, pt) >= MIN_AUC and int(te.y.sum()) >= 20
+        lines += ["", f"**Stage B is {'ACTIVE' if b_ok else 'OFF'}**: it is used only if test AUC >= {MIN_AUC} with >= 20 positives "
+                  f"(test AUC {_auc(te.y, pt):.3f}, {int(te.y.sum())} positive rows). Pre-graduation behaviour told us little about who explodes afterwards; "
+                  "the plus50 model handles explosions once a coin reaches $150k."]
+        meta["b_active"] = bool(b_ok)
+        meta["features_b"] = FEATURES
+        meta["trained"]["b"] = {"at": datetime.now(timezone.utc).isoformat(), "rows": len(db), "auc_val": _auc(va.y, pv), "auc_test": _auc(te.y, pt), "base_test": float(te.y.mean())}
+    else:
+        lines += ["## Stage B: skipped", "", f"Off (test AUC {(meta.get('trained', {}).get('b') or {}).get('auc_test', 0):.3f} on {b_at[:10]}); re-checked weekly to save CPU and disk."]
+
     # ---- stage A (when live labels suffice)
     da = build_a()
     if len(da) and "curve_progress" in da.columns:
@@ -585,6 +692,95 @@ def train():
     print("\n".join(lines))
 
 
+# ---------------------------------------------------------------- candle archive (git backup)
+# data/ is not in git, and the candle cache is the only history beyond pump.fun's ~3.5-day window. Once a
+# calendar day is >= ARCHIVE_AFTER_D old, its candle files are packed into archive/candles/<day>.jsonl.gz
+# (immutable, one commit per day, ~1 MB/day compressed). Raw files are deleted RAW_KEEP_D days after their
+# day was archived AND verified by reading it back. `restore_candles()` puts them back for retraining.
+ARCHIVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "archive", "candles")
+CANDLE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "pump", "candles")
+ARCHIVE_AFTER_D, RAW_KEEP_D = 3, 14
+
+
+def archive_candles(now=None):
+    now = now or time.time()
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    if not os.path.isdir(CANDLE_DIR):
+        return {"archived_days": 0, "deleted": 0}
+    by_day = {}
+    for fn in os.listdir(CANDLE_DIR):
+        p = os.path.join(CANDLE_DIR, fn)
+        if fn.endswith(".json") and os.path.isfile(p):
+            m = os.path.getmtime(p)
+            if now - m >= ARCHIVE_AFTER_D * 86400:
+                by_day.setdefault(time.strftime("%Y-%m-%d", time.localtime(m)), []).append((fn, p, m))
+    new_days = deleted = 0
+    for day, files in sorted(by_day.items()):
+        out = os.path.join(ARCHIVE_DIR, day + ".jsonl.gz")
+        if not os.path.exists(out):
+            tmp = out + ".tmp"
+            with gzip.open(tmp, "wt", compresslevel=9) as g:
+                for fn, p, _ in files:
+                    try:
+                        g.write(json.dumps({"mint": fn[:-5], "bars": json.load(open(p))}, separators=(",", ":")) + "\n")
+                    except (OSError, ValueError):
+                        continue
+            os.replace(tmp, out)
+            new_days += 1
+        # delete raw files only when they are old enough AND present in the archive
+        if now - max(m for _, _, m in files) >= RAW_KEEP_D * 86400:
+            have = {r["mint"] for r in _read_archive(out)}
+            for fn, p, _ in files:
+                if fn[:-5] in have:
+                    os.remove(p); deleted += 1
+    return {"archived_days": new_days, "deleted": deleted}
+
+
+def _read_archive(path):
+    try:
+        with gzip.open(path, "rt") as g:
+            for line in g:
+                try:
+                    yield json.loads(line)
+                except ValueError:
+                    pass
+    except (EOFError, OSError, zlib.error):
+        return
+
+
+def restore_candles(day=None):
+    """Put archived candle files back into the cache (all days, or one YYYY-MM-DD). Never overwrites."""
+    os.makedirs(CANDLE_DIR, exist_ok=True)
+    n = 0
+    for fn in sorted(os.listdir(ARCHIVE_DIR)):
+        if day and not fn.startswith(day):
+            continue
+        for r in _read_archive(os.path.join(ARCHIVE_DIR, fn)):
+            p = os.path.join(CANDLE_DIR, r["mint"] + ".json")
+            if not os.path.exists(p):
+                json.dump(r["bars"], open(p, "w")); n += 1
+    return n
+
+
+def backup():
+    """Pack finished days of candles, then commit + push archive/ (only that folder) if it changed."""
+    import subprocess
+    r = archive_candles()
+    here = os.path.dirname(os.path.abspath(__file__))
+    if os.path.exists(LABELS):                                   # tiny, irreplaceable once the candles expire
+        shutil.copyfile(LABELS, os.path.join(here, "archive", "labels.json"))
+    git = ["/usr/local/bin/git", "-C", here]
+    subprocess.run(git + ["add", "archive"], capture_output=True)
+    if subprocess.run(git + ["diff", "--cached", "--quiet", "--", "archive"]).returncode:
+        msg = "candle archive: %d new day(s)\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" % r["archived_days"]
+        subprocess.run(git + ["commit", "-q", "-m", msg, "--", "archive"], capture_output=True)
+        p = subprocess.run(git + ["push", "-q"], capture_output=True, text=True)
+        r["pushed"] = p.returncode == 0
+        if p.returncode:
+            r["push_error"] = p.stderr.strip()[:200]
+    return r
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "tick":
@@ -593,8 +789,15 @@ if __name__ == "__main__":
         train()
     elif cmd == "prune":
         prune()
+    elif cmd == "backup":
+        print(backup())
+    elif cmd == "restore":
+        print("restored", restore_candles(sys.argv[2] if len(sys.argv) > 2 else None), "candle files")
     elif cmd == "board":
         b = load(BOARD, None)
         print(json.dumps(b, indent=1)[:4000] if b else "no board yet")
     else:
         print(__doc__)
+
+
+

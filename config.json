@@ -37,8 +37,8 @@
   "_emails_paused": "All emails paused by the user 2026-09-24 11:4x. Set email_digest.enabled, coinbase_listing_email, ml_picks_email back to true to resume.",
   "plus50_email": false,
   "_plus50_comment": "2026-09-28: the detector shows only coins with a good chance of +50% one hour after being added (plus50.py; a coin shows only if held-out coins with that score hit +50% at least 40% of the time). plus50_email sends each pick once. Turned ON by the user 2026-09-28 (the other emails stay paused).",
-  "pump_watch": false,
-  "_pump_watch_comment": "2026-09-29: the user trades only on Coinbase and Robinhood; no pump.fun or DEX-watcher token is listed on either (0 of 1,636 + 1,031 tracked), so collection is paused and its data pruned. Set true (and reload the com.dhruv.coinlaunch.pre/plus50 agents) to resume; `agent.py --pump` shows the old boards.",
+  "pump_watch": true,
+  "_pump_watch_comment": "2026-09-29: the ORIGINAL watcher (agent.py: >= min_mc_usd within max_age_hours, same filters, Solana + Base) stays on with its original parameters; its tokens and hits are checked against the Coinbase/Robinhood address lists, and only listed ones are shown. The later ML add-ons (pre-graduation collector, plus50, trainers) are unloaded. `agent.py --pump` shows the raw watcher board.",
   "listed": {
     "_comment": "Coinbase/Robinhood-listed token board (listed.py): A = fast and steady gain, B = holds it. Thresholds documented in listed.py.",
     "fast_gain_6h": 0.05,
@@ -49,7 +49,17 @@
     "hold_hours": 12,
     "max_drawdown": 0.06,
     "max_off_high": 0.04,
-    "min_usd_vol_24h": 500000
+    "min_usd_vol_24h": 500000,
+    "radar": {
+      "_comment": "Separate radar of unlisted heavy-volume Solana/Base tokens (not the watcher; the watcher keeps its original parameters).",
+      "show": true,
+      "pages": 4,
+      "min_liquidity": 1000000,
+      "min_volume_24h": 2000000,
+      "min_age_days": 3,
+      "min_cap": 20000000,
+      "max_scored": 14
+    }
   },
   "_plus50_email_comment": "Turned off 2026-09-29 with the pump watch (no pick can be listed on Coinbase or Robinhood)."
 }

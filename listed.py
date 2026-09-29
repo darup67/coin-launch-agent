@@ -21,7 +21,7 @@ because pump.fun is full of look-alike tickers (PUMP, RAY, "NVIDIA", ...). Marke
 Data: trade-core's 15-minute bar store (already refreshed every 15 min for the whole universe), so a scan makes no price
 API calls. Thresholds live in config.json under "listed".
 """
-import json, math, os, sys, time, urllib.request
+import json, math, os, sys, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "data")
@@ -48,6 +48,7 @@ DEFAULTS = {
 # Not "tokens" in the sense of the request: stablecoins, wrapped / staked assets, gold.
 CHAIN_ALIAS = {"binance-smart-chain": "bsc", "arbitrum-one": "arbitrum", "the-open-network": "ton", "polygon-pos": "polygon",
                "optimistic-ethereum": "optimism", "avalanche": "avacchain", "ethereum-classic": "ethereumclassic"}
+WRAPPED = {"solana:so11111111111111111111111111111111111111112", "base:0x4200000000000000000000000000000000000006"}   # wrapped SOL / WETH: the chain's own coin
 EXCLUDE = {"USDC", "USDT", "USDG", "PYUSD", "USDF", "USDS", "DAI", "EURC", "PAXG", "XAUT", "WBTC", "CBBTC", "WETH", "STETH", "WSTETH",
            "CBETH", "JITOSOL", "MSOL", "BSOL", "USDE", "FDUSD", "RLUSD", "USD1"}
 
@@ -78,7 +79,9 @@ def cfg():
 
 
 def key(chain, addr):
-    return f"{chain}:{addr.lower() if chain == 'base' else addr}"
+    # Coinbase's /currencies returns some Solana mints lower-cased (RAY did), and a base58 mint that differs from another only by
+    # case is not realistic (58^44 combinations), so every address is compared lower-cased. `canon` restores the real case for links.
+    return f"{chain}:{addr.lower()}"
 
 
 # ------------------------------------------------------------------ venues (who is really listed)
@@ -110,7 +113,12 @@ def venues(refresh=False):
     addr = {}
     chains = {}                                        # symbol -> blockchains the asset lives on
     cb_nets = {}
+    pretrade = {}                                      # Coinbase enabled the asset (deposits) but no spot product trades yet: a classic listing precursor
     for c in cb_cur:
+        if c.get("status") == "online" and c["id"] not in tradable and (c.get("details") or {}).get("type") == "crypto" \
+                and c["id"] not in EXCLUDE:
+            pretrade[c["id"]] = {"name": c.get("name"), "addr": {n["id"]: n["contract_address"] for n in c.get("supported_networks", [])
+                                                                  if n.get("id") in ("solana", "base") and n.get("contract_address")}}
         if c.get("status") != "online" or c["id"] not in tradable:
             continue
         coinbase[c["id"]] = c.get("name")
@@ -151,7 +159,15 @@ def venues(refresh=False):
     # a token (PulseChain, Scroll, ...), which would over-count, so Robinhood-only assets count only when their chain is in
     # this set. Override with config listed.allowed_chains to narrow it.
     allowed = sorted(set(cb_nets) | {"robinhood"})
-    out = {"at": time.time(), "coinbase": coinbase, "robinhood": robinhood, "addr": addr, "chains": chains,
+    canon = {}
+    try:
+        for x in _cg_platforms():
+            for chain, a in x["p"].items():
+                if key(chain, a) in addr:
+                    canon[key(chain, a)] = a
+    except Exception:
+        pass
+    out = {"at": time.time(), "coinbase": coinbase, "robinhood": robinhood, "addr": addr, "canon": canon, "chains": chains,
            "coinbase_networks": cb_nets, "robinhood_networks": rh_nets, "allowed_chains": allowed}
     save(VENUES, out)
     return out
@@ -177,9 +193,6 @@ def metrics(bars, c):
     """A/B metrics for one token from its 15-minute bars. None if there is not a full 24 h of data."""
     if len(bars) < 100:
         return None
-    last = bars[-1]["c"]
-    b96 = bars[-96:]
-    closes = [b["c"] for b in bars]
     # hourly closes counted back from the newest bar by timestamp (a missing 15-minute bar falls back to the one before it)
     by_t = {b["t"]: b["c"] for b in bars}
     t0 = bars[-1]["t"]
@@ -191,7 +204,12 @@ def metrics(bars, c):
                 h.append(by_t[t - back]); break
         else:
             return None
+    b96 = bars[-96:]
+    return core(h, max(b["h"] for b in b96), sum(b["c"] * b["v"] for b in b96), bars[-1]["c"], bars[-1]["t"], c)
 
+
+def core(h, hi24, vol, last, last_t, c):
+    """h = 25 hourly closes, oldest first. Shared by the listed universe (15 m bars) and the radar (hourly OHLCV)."""
     r1 = [h[i] / h[i - 1] - 1 for i in range(1, len(h))]                # 24 hourly returns
     ret_24 = h[-1] / h[0] - 1
     ret_6 = h[-1] / h[-7] - 1
@@ -201,19 +219,14 @@ def metrics(bars, c):
     sxx = sum((x - mx) ** 2 for x in xs); sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys)); syy = sum((y - my) ** 2 for y in ys)
     slope = sxy / sxx if sxx else 0
     r2 = (sxy * sxy / (sxx * syy)) if sxx and syy else 0
-    best_hr = max(r1)
     gain_sum = sum(r for r in r1 if r > 0)
-    spike = (best_hr / gain_sum) if gain_sum > 0 else 1.0
-    hold = c["hold_hours"]
-    hh = h[-(hold + 1):]
+    spike = (max(r1) / gain_sum) if gain_sum > 0 else 1.0
+    hh = h[-(c["hold_hours"] + 1):]
     peak, mdd = hh[0], 0.0
     for x in hh:
         peak = max(peak, x); mdd = max(mdd, 1 - x / peak)
-    hi24 = max(b["h"] for b in b96)
-    off_high = 1 - last / hi24
-    vol = sum(b["c"] * b["v"] for b in b96)
     return {"price": last, "ret_6h": ret_6, "ret_24h": ret_24, "up_hours": up, "r2": r2 if slope > 0 else 0.0, "spike_share": spike,
-            "max_drawdown": mdd, "off_high": off_high, "usd_vol_24h": vol, "slope_h": slope, "last_bar": bars[-1]["t"]}
+            "max_drawdown": mdd, "off_high": 1 - last / hi24, "usd_vol_24h": vol, "slope_h": slope, "last_bar": last_t}
 
 
 def grade(m, c):
@@ -250,6 +263,189 @@ def _mcaps(rows):
                 p = best.get(r["address"])
                 if p:
                     r["mcap"] = p.get("marketCap") or p.get("fdv")
+
+
+# ------------------------------------------------------------------ loose ends: tokens that GET listed, and tokens that might
+LISTINGS = os.path.join(DATA, "listings.json")
+_last_gt = [0.0]
+
+
+def gt(path):
+    """GeckoTerminal (free, ~30 calls/min): paced, one retry on 429. Returns parsed JSON or None."""
+    for attempt in (0, 1):
+        wait = _last_gt[0] + 2.2 - time.time()
+        if wait > 0:
+            time.sleep(wait)
+        _last_gt[0] = time.time()
+        try:
+            return get("https://api.geckoterminal.com/api/v2" + path, 20)
+        except urllib.error.HTTPError as e:
+            if e.code != 429:
+                return None
+            time.sleep(8)
+        except Exception:
+            return None
+    return None
+
+
+def origin(chain, address):
+    """Where a newly listed token came from: age of its first pool, whether it launched on pump.fun, size."""
+    out = {}
+    t = gt(f"/networks/{chain}/tokens/{address}")
+    a = ((t or {}).get("data") or {}).get("attributes") or {}
+    if a:
+        out.update({"name": a.get("name"), "fdv": a.get("fdv_usd"), "mcap": a.get("market_cap_usd")})
+    p = gt(f"/networks/{chain}/tokens/{address}/pools?page=1")
+    pools = (p or {}).get("data") or []
+    born = sorted(x["attributes"]["pool_created_at"] for x in pools if x["attributes"].get("pool_created_at"))
+    if born:
+        out["first_pool"] = born[0]
+        out["age_days"] = round((time.time() - time.mktime(time.strptime(born[0][:19], "%Y-%m-%dT%H:%M:%S")) + time.timezone) / 86400, 1)
+    dexes = {(x.get("relationships") or {}).get("dex", {}).get("data", {}).get("id", "") for x in pools}
+    out["pump_fun"] = address.endswith("pump") or any("pump" in d for d in dexes)
+    return out
+
+
+def listing_watch(v):
+    """Diff Coinbase / Robinhood against the last scan. New Coinbase or Robinhood assets, and assets Coinbase has enabled
+    but does not trade yet (deposits open), become events, enriched by contract address with the token's origin (a pump.fun
+    or DEX launch has an age and a first pool). First run only seeds the baseline. Events are kept 30 days."""
+    st = load(LISTINGS, {})
+    now = time.time()
+    cur = {"coinbase": sorted(v["coinbase"]), "robinhood": sorted(v["robinhood"]), "pretrade": sorted(v.get("pretrade", {}))}
+    if not st.get("seeded"):
+        save(LISTINGS, {"seeded": now, "events": [], **cur})
+        return []
+    events = [e for e in st.get("events", []) if now - e["t"] < 30 * 86400]
+    for kind, label in (("coinbase", "Coinbase listed"), ("pretrade", "Coinbase deposits open, not trading yet"), ("robinhood", "Robinhood listed")):
+        for sym in sorted(set(cur[kind]) - set(st.get(kind, []))):
+            if sym in EXCLUDE:
+                continue
+            if kind == "coinbase" and any(e["symbol"] == sym and e["kind"] == "pretrade" for e in events):
+                label = "Coinbase listed (deposits were open first)"
+            ad = (v.get("pretrade", {}).get(sym) or {}).get("addr") or {a.split(":", 1)[0]: a.split(":", 1)[1] for a, m in v["addr"].items() if m["symbol"] == sym}
+            chain, address = next(iter(ad.items()), (None, None))
+            e = {"t": now, "kind": kind, "label": label, "symbol": sym, "chain": chain, "address": address}
+            if chain in ("solana", "base") and address:
+                try:
+                    e["origin"] = origin(chain, address)
+                except Exception:
+                    pass
+            h = next((x for x in load(HITS, {}).values() if x["token"] == address), None) if address else None
+            if h:
+                e["watcher_hit"] = {"t": h.get("t"), "mc": h.get("mc")}
+            if kind == "coinbase":
+                try:
+                    e["price0"] = float(get(f"https://api.exchange.coinbase.com/products/{sym}-USD/ticker", 15)["price"])
+                except Exception:
+                    pass
+            events.append(e)
+    save(LISTINGS, {"seeded": st["seeded"], "events": events, **cur})
+    return events
+
+
+def other_cex():
+    """Base-asset symbols on other exchanges (Kraken, Bitstamp, OKX, Binance.US, Upbit, Gemini), cached a day. A token that is on
+    several other exchanges but not on Coinbase / Robinhood is the likeliest to be listed next."""
+    c = load(os.path.join(DATA, "other_cex.json"), {})
+    if c and time.time() - c.get("at", 0) < 86400:
+        return {k: set(x) for k, x in c["ex"].items()}
+    ex = {}
+
+    def safe(name, fn):
+        try:
+            ex[name] = sorted({x.upper() for x in fn()})
+        except Exception:
+            pass
+    safe("Kraken", lambda: [(p.get("wsname") or "").split("/")[0] for p in get("https://api.kraken.com/0/public/AssetPairs")["result"].values()])
+    safe("Bitstamp", lambda: [p["name"].split("/")[0] for p in get("https://www.bitstamp.net/api/v2/trading-pairs-info/")])
+    safe("OKX", lambda: [p["instId"].split("-")[0] for p in get("https://www.okx.com/api/v5/public/instruments?instType=SPOT")["data"]])
+    safe("Binance.US", lambda: [p["baseAsset"] for p in get("https://api.binance.us/api/v3/exchangeInfo")["symbols"]])
+    safe("Upbit", lambda: [m["market"].split("-")[1] for m in get("https://api.upbit.com/v1/market/all")])
+    safe("Gemini", lambda: [x[:-3] for x in get("https://api.gemini.com/v1/symbols") if x.endswith("usd")])
+    save(os.path.join(DATA, "other_cex.json"), {"at": time.time(), "ex": ex})
+    return {k: set(x) for k, x in ex.items()}
+
+
+def radar(v, c):
+    """SEPARATE from the original watcher (whose parameters are untouched). Tokens NOT on Coinbase / Robinhood yet that could plausibly be
+    listed later: heavily traded on Solana / Base DEXs (top pools by 24 h volume), real liquidity, more than a few days old, not a
+    stablecoin. Each gets the same A/B test from hourly candles and a list of OTHER exchanges it trades on, verified by contract
+    address through CoinGecko (never ticker alone). Shown apart from the main board, clearly marked not buyable on Coinbase/Robinhood
+    today; runs hourly."""
+    r = c.get("radar", {})
+    ok = allowed_chains(v)
+    cg = {}
+    for x in _cg_platforms():
+        for chain, a in x["p"].items():
+            cg.setdefault(key(chain, a), x)
+    cex = other_cex()
+    cands = {}
+    for chain in ("solana", "base"):
+        if chain not in ok:
+            continue
+        for page in range(1, r.get("pages", 4) + 1):
+            d = gt(f"/networks/{chain}/pools?page={page}&sort=h24_volume_usd_desc&include=base_token")
+            for p in (d or {}).get("data", []):
+                a = p["attributes"]
+                addr = p["relationships"]["base_token"]["data"]["id"].split("_", 1)[1]
+                sym = (a.get("name") or "").split(" / ")[0].strip().upper()
+                liq, vol = float(a.get("reserve_in_usd") or 0), float((a.get("volume_usd") or {}).get("h24") or 0)
+                cap = float(a.get("market_cap_usd") or a.get("fdv_usd") or 0)
+                born = a.get("pool_created_at")
+                age = (time.time() - time.mktime(time.strptime(born[:19], "%Y-%m-%dT%H:%M:%S")) + time.timezone) / 86400 if born else 0
+                price = float(a.get("base_token_price_usd") or 0)
+                if (sym in EXCLUDE or key(chain, addr) in WRAPPED or supported(chain, addr) or liq < r.get("min_liquidity", 1_000_000) or vol < r.get("min_volume_24h", 2_000_000)
+                        or age < r.get("min_age_days", 3) or cap < r.get("min_cap", 20_000_000) or 0.97 < price < 1.03 or price <= 0):
+                    continue
+                k = key(chain, addr)
+                if k not in cands or vol > cands[k]["vol24"]:
+                    cands[k] = {"symbol": sym, "chain": chain, "address": addr, "pool": a["address"], "vol24": vol, "liq": liq, "mcap": cap, "age_days": round(age, 1)}
+    rows = []
+    for k, x in sorted(cands.items(), key=lambda kv: -kv[1]["vol24"])[:r.get("max_scored", 14)]:
+        d = gt(f"/networks/{x['chain']}/pools/{x['pool']}/ohlcv/hour?aggregate=1&limit=26")
+        bars = sorted(((d or {}).get("data") or {}).get("attributes", {}).get("ohlcv_list", []))
+        if len(bars) < 25:
+            continue
+        bars = bars[-25:]
+        m = core([b[4] for b in bars], max(b[2] for b in bars[1:]), sum(b[5] for b in bars[1:]), bars[-1][4], bars[-1][0] * 1000, c)
+        A, B, score = grade(m, {**c, "min_usd_vol_24h": 0})
+        cgx = cg.get(k)
+        on = sorted(n for n, syms in cex.items() if cgx and cgx["sym"] in syms) if cgx else []
+        rows.append({**x, "A": A, "B": B, "clean": A and B, "score": score, "other_exchanges": on, "cg_verified": bool(cgx),
+                     **{q: (round(z, 4) if isinstance(z, float) else z) for q, z in m.items() if q in ("ret_6h", "ret_24h", "up_hours", "r2", "max_drawdown", "off_high", "spike_share")},
+                     "links": {"DexScreener": f"https://dexscreener.com/{x['chain']}/{x['address']}"}})
+    rows.sort(key=lambda z: (-int(z["clean"]), -len(z["other_exchanges"]), -z["score"]))
+    return {"updated": time.time(), "candidates": len(cands), "rows": rows}
+
+
+HITS = os.path.join(DATA, "watcher_hits.json")
+
+
+def watcher_check(v):
+    """The ORIGINAL coin watcher (agent.py, unchanged: >= $150k within 4 h of a first pool, same liquidity / buys / honeypot filters,
+    Solana + Base) is the source of pump.fun and DEX candidates. This checks every token it tracks or has ever flagged against the
+    Coinbase / Robinhood address lists. A hit that later gets listed becomes a 'listing' event with the watcher's record attached."""
+    hits = load(HITS, {})
+    tracked = load(os.path.join(DATA, "tracked.json"), {}).get("tokens", [])
+    seen = {**{f"{h['net']}:{h['token']}": h for h in hits.values()}, **{f"{t['net']}:{t['token']}": {**t, "hit": False} for t in tracked}}
+    sup_hits, sup_tracked, ev = [], [], load(LISTINGS, {})
+    events = ev.get("events", [])
+    for k, t in seen.items():
+        m = supported(t["net"], t["token"])
+        if not m:
+            continue
+        row = {"symbol": t.get("symbol"), "chain": t["net"], "address": t["token"], "coinbase": m["coinbase"], "robinhood": m["robinhood"],
+               "links": links(m["symbol"], m["coinbase"], m["robinhood"], t["net"], t["token"])}
+        (sup_hits if k in {f"{h['net']}:{h['token']}" for h in hits.values()} else sup_tracked).append(row)
+        if k in {f"{h['net']}:{h['token']}" for h in hits.values()} and not any(e.get("address") == t["token"] and e["kind"] == "watcher_hit_listed" for e in events):
+            h = next(h for h in hits.values() if h["token"] == t["token"])
+            events.append({"t": time.time(), "kind": "watcher_hit_listed", "label": "Watcher hit is now listed", "symbol": m["symbol"], "chain": t["net"],
+                           "address": t["token"], "watcher_hit": {"t": h.get("t"), "mc": h.get("mc")}})
+    if events != ev.get("events", []):
+        ev["events"] = events
+        save(LISTINGS, ev)
+    return {"tracked": len(tracked), "hits": len(hits), "listed_hits": sup_hits, "listed_tracked": sup_tracked}
 
 
 def links(sym, cb, rh, chain=None, addr=None):
@@ -293,6 +489,7 @@ def scan(quiet=False):
         a = by_addr.get(sym)
         if a:
             r["chain"], r["address"] = a.split(":", 1)
+            r["address"] = v.get("canon", {}).get(a, r["address"])
         rows.append(r)
     _mcaps([r for r in rows if r["clean"] or r["A"] or r["B"]])
     st = load(STATE, {})
@@ -304,10 +501,26 @@ def scan(quiet=False):
         else:
             st.pop(r["symbol"], None)
     save(STATE, st)
+    try:
+        events = listing_watch(v)
+    except Exception as e:
+        events = load(LISTINGS, {}).get("events", []); print("listing watch error", repr(e), file=sys.stderr)
+    try:
+        wc = watcher_check(v)
+    except Exception as e:
+        wc = None; print("watcher check error", repr(e), file=sys.stderr)
+    events = load(LISTINGS, {}).get("events", events)
+    rd = load(BOARD, {}).get("radar")
+    if c.get("radar", {}).get("show", True) and (not rd or time.time() - rd["updated"] > 55 * 60):
+        try:
+            rd = radar(v, c)
+        except Exception as e:
+            print("radar error", repr(e), file=sys.stderr)
     for r in rows:
         r["links"] = links(r["symbol"], r["coinbase"], r["robinhood"], r.get("chain"), r.get("address"))
     rows.sort(key=lambda r: (-int(r["clean"]), -r["score"]))
     out = {"updated": now, "universe": len(rows), "thresholds": c, "excluded_chain_unverified": sorted(off_chain),
+           "listings": [e for e in events if time.time() - e["t"] < 14 * 86400], "watcher": wc, "radar": rd,
            "chains": {"coinbase": len(v.get("coinbase_networks", {})), "robinhood": len(v.get("robinhood_networks", {})), "allowed": len(ok_chains)},
            "counts": {"clean": sum(r["clean"] for r in rows), "A_only": sum(r["A"] and not r["B"] for r in rows), "B_only": sum(r["B"] and not r["A"] for r in rows)},
            "rows": rows}
@@ -315,6 +528,44 @@ def scan(quiet=False):
     if not quiet:
         show(out)
     return out
+
+
+def _ago(t):
+    d = time.time() - t
+    return f"{d / 3600:.1f}h ago" if d < 86400 else f"{d / 86400:.1f}d ago"
+
+
+def show_extras(b):
+    """Watcher check, new listings, and the separate radar."""
+    w = b.get("watcher")
+    if w is not None:
+        print(f"\nOriginal watcher (unchanged parameters): tracking {w['tracked']} tokens, {w['hits']} hits so far; "
+              f"{len(w['listed_hits']) + len(w['listed_tracked'])} of them listed on Coinbase or Robinhood")
+        for r in w["listed_hits"] + w["listed_tracked"]:
+            print(f"  {r['symbol']} ({r['chain']})  " + " · ".join(f"{k} {u}" for k, u in r["links"].items()))
+    ls = b.get("listings") or []
+    print("\nNew listings and listing signals (last 14 days): " + ("none yet" if not ls else ""))
+    for e in sorted(ls, key=lambda e: -e["t"])[:8]:
+        o = e.get("origin") or {}
+        bits = [e["label"], _ago(e["t"])]
+        if o.get("pump_fun"):
+            bits.append("launched on pump.fun")
+        if o.get("age_days") is not None:
+            bits.append(f"token {o['age_days']}d old")
+        if e.get("watcher_hit"):
+            bits.append("was a watcher hit")
+        print(f"  {e['symbol']:<9} " + " · ".join(bits))
+    rd = b.get("radar")
+    if rd and rd.get("rows") is not None:
+        rows = rd["rows"]
+        clean = [r for r in rows if r["clean"]]
+        print(f"\nRadar (separate; NOT on Coinbase or Robinhood today, so not buyable there): {len(clean)} of {len(rows)} scored pass A and B · {rd['candidates']} unlisted "
+              f"heavy-volume Solana/Base tokens screened · {int((time.time() - rd['updated']) / 60)}m ago")
+        for r in (clean or rows)[:5]:
+            on = ", ".join(r["other_exchanges"]) or ("no other exchange found" if r["cg_verified"] else "exchange match unverified")
+            tag = "A+B" if r["clean"] else ("A" if r["A"] else "B" if r["B"] else "-")
+            print(f"  {r['symbol']:<9} {tag:<3} 24h {_pct(r['ret_24h'])}  worst dip {r['max_drawdown']:.1%}  mcap ${r['mcap']:,.0f}  liq ${r['liq']:,.0f}  {r['age_days']}d old  also on: {on}")
+            print("    🔗 " + " · ".join(f"{k} {u}" for k, u in r["links"].items()))
 
 
 def _pct(x):
@@ -351,6 +602,7 @@ def show(b=None, top=8):
         print(f"  {r['symbol']:<9} score {r['score']:>3}  24h {_pct(r['ret_24h'])}  6h {_pct(r['ret_6h'])}  up-hours {r['up_hours']:.0%}  R² {r['r2']:.2f}  "
               f"worst dip {r['max_drawdown']:.1%}  off high {r['off_high']:.1%}{mc}{since}  [{venue}]{halt}")
         print("    🔗 " + " · ".join(f"{k} {u}" for k, u in r["links"].items()))
+    show_extras(b)
 
 
 # ------------------------------------------------------------------ junk pruning

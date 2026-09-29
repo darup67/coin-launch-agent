@@ -250,3 +250,9 @@ from incomplete to complete (`watched: true`); coins first read already complete
 Every candidate row in `agent.py` (picks, closest-to-graduating, movers, ranked board, Base watch) and the +50% pick email now carries `feeds.links()`:
 DexScreener chart, Pump.fun coin page (Solana), and a Coinbase Wallet deep link (`go.cb-w.com/dapp?cb_url=…`) that opens Jupiter (Solana) or Uniswap (Base) for that
 address inside Coinbase Wallet's browser. Coinbase has no per-token page for onchain coins. Opening a link places no order.
+
+## Custom curves (2026-09-29)
+`onchain.py` computes `curve_k_ratio` = virtual token x virtual SOL / the default curve's invariant (3.22e25) and `curve_std` (1 if 0.85-1.6). Some
+launches use custom curves with a few SOL of virtual reserves (Quine: 2.4 SOL virtual, ~1 SOL to finish), so their progress % is not comparable and
+graduating means little. Both are model features (stage A), and `agent.py` ranks standard curves first and flags the rest with a warning.
+

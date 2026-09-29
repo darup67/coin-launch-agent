@@ -18,6 +18,7 @@ import base64, json, math, struct, threading, time, urllib.error, urllib.request
 
 SOL_RPC = "https://api.mainnet-beta.solana.com"
 BASE_RPCS = ["https://mainnet.base.org", "https://base.drpc.org", "https://1rpc.io/base"]
+INITIAL_K = 1_073_000_000_000_000 * 30_000_000_000  # pump.fun default curve: virtual token x virtual SOL at launch
 INITIAL_REAL_TOKENS = 793_100_000_000_000          # pump.fun: 793.1M tokens x 1e6 decimals sold along the curve
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 ZERO = "0x" + "0" * 40
@@ -75,6 +76,11 @@ def solana_dynamic(meta, created_ms, prev=None):
             out["curve_progress"] = max(0.0, min(1.0, 1 - c["real_token"] / INITIAL_REAL_TOKENS))
             out["curve_sol"] = c["real_sol"] / 1e9
             out["curve_complete"] = int(c["complete"])
+            # constant-product invariant vs the default curve: custom curves (tiny virtual SOL) can finish for ~1 SOL,
+            # so their progress % is not comparable with a standard curve's (found 2026-09-29 on Quine)
+            if c["virtual_token"] and c["virtual_sol"]:
+                out["curve_k_ratio"] = c["virtual_token"] * c["virtual_sol"] / INITIAL_K
+                out["curve_std"] = int(0.85 <= out["curve_k_ratio"] <= 1.6)
     sigs = rpc(SOL_RPC, "getSignaturesForAddress", [meta["bonding_curve"], {"limit": 1000}])
     if sigs is not None:
         bt = [s.get("blockTime") or 0 for s in sigs]

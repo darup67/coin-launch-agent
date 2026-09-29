@@ -435,6 +435,17 @@ def show_board(cfg):
           "\nAlready-alerted coins leave the board; they are in agent.out.log.")
 
 
+def show_base():
+    """Base coins from the watcher, with holder distribution from free Base RPC logs (data collection; no model yet)."""
+    bb = load(os.path.join(DATA, "pre", "base_board.json"), None)
+    if not bb or time.time() - bb["updated"] > 1200 or not bb["rows"]:
+        return
+    print(f"\n🔵 Base watch (holder data being collected for a future model; {len(bb['rows'])} of {bb['candidates']} candidates measured):")
+    for r in sorted(bb["rows"], key=lambda r: r.get("top1_share", 1))[:6]:
+        print(f"   {(r.get('symbol') or '?')[:12]:<12} ${r['mc']:>10,.0f} mc  liq ${r['liq']:>8,.0f}  {r['age_min']:>4.0f}m old  holders {r.get('holders', '?'):>5}  "
+              f"top1 {100*r.get('top1_share', 0):3.0f}%  next5 {100*r.get('top5_ex1_share', 0):3.0f}%  transfers/5m {r.get('transfers_5m', '?'):>3}  renounced {r.get('owner_renounced', '?')}")
+
+
 def show_prelaunch():
     """Pre-graduation section: brand-new pump.fun coins with traction, scored by the prelaunch models."""
     b = load(os.path.join(DATA, "pre", "board.json"), None)
@@ -446,10 +457,18 @@ def show_prelaunch():
     if not meta.get("a_active") and not meta.get("b_active"):
         print(f"\n🔮 Pre-graduation watch: NO RANKING YET. The graduation model needs live labels (a coin's outcome is known 4h+ after launch): "
               f"{labeled} coins labeled so far, first training tomorrow 06:30. The explode-after-graduation model failed its held-out test (AUC {meta.get('trained', {}).get('b', {}).get('auc_test', 0):.2f}) and is off.")
-        rows = sorted(b["rows"], key=lambda r: -r["ret_15m"])[:6]
-        print("   Movers right now (NOT a prediction: sorted by 15-min move):")
-        for r in rows:
-            print(f"   {r['symbol'][:12]:<12} ${r['mc']:>7,}  {r['age_min']:>4.0f}m old  15m {r['ret_15m']:+.2f}  5m vol ${r['vol_5m']:,}  socials {r['socials']}  creator's past graduates {r['creator_prior_grads']}  {r['mint']}")
+        rows = [r for r in b["rows"] if r.get("curve") is not None]
+        if rows:
+            print("   Closest to graduating right now (bonding-curve progress read from the chain; a fact, NOT a prediction):")
+            for r in sorted(rows, key=lambda r: -r["curve"])[:8]:
+                print(f"   {r['symbol'][:12]:<12} curve {100*r['curve']:5.1f}%  ${r['mc']:>7,}  {r['age_min']:>4.0f}m old  trades/5m {r['trades_5m'] if r['trades_5m'] is not None else '?':>4}  "
+                      f"failed txs {int(100*(r['fail_share'] or 0)):>2}%  15m {r['ret_15m']:+.2f}  socials {r['socials']}  {r['mint']}")
+        else:
+            rows = sorted(b["rows"], key=lambda r: -r["ret_15m"])[:6]
+            print("   Movers right now (NOT a prediction: sorted by 15-min move):")
+            for r in rows:
+                print(f"   {r['symbol'][:12]:<12} ${r['mc']:>7,}  {r['age_min']:>4.0f}m old  15m {r['ret_15m']:+.2f}  5m vol ${r['vol_5m']:,}  socials {r['socials']}  creator's past graduates {r['creator_prior_grads']}  {r['mint']}")
+        show_base()
         return
     print(f"\n🔮 Pre-graduation watch (most likely to graduate{' and explode' if meta.get('b_active') else ''}), {dur(time.time() - b['updated'])} ago:")
     for r in b["rows"][:10]:

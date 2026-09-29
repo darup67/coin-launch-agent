@@ -217,6 +217,9 @@ class Watcher:
         self.alert({**t, **s, "age": age})
 
     def alert(self, h):
+        hits = load(os.path.join(DATA, "watcher_hits.json"), {})      # durable, tiny: lets listed.py notice when a hit gets listed later
+        hits[h["key"]] = {"net": h["net"], "token": h["token"], "symbol": h["symbol"], "t": int(time.time()), "mc": h.get("mc")}
+        save(os.path.join(DATA, "watcher_hits.json"), hits)
         line = card_line(h)
         if self.seeding:
             log(f"already over at first start (no banner) {line}")
@@ -560,8 +563,8 @@ def main():
     else:
         import listed
         listed.show()
-        print("\nPump.fun / DEX launches are hidden: none of the tokens tracked so far is listed on Coinbase or Robinhood, so none can be "
-              "bought there. `agent.py --pump` shows the old (paused) boards; `listed.py check <address>` tests one token.")
+        print("\nPump.fun / DEX launches from the original watcher show above only if they are listed on Coinbase or Robinhood (matched by contract address). "
+              "`agent.py --pump` shows the raw watcher board; `listed.py check <address>` tests one token.")
 
 
 if __name__ == "__main__":

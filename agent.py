@@ -435,6 +435,29 @@ def show_board(cfg):
           "\nAlready-alerted coins leave the board; they are in agent.out.log.")
 
 
+def show_prelaunch():
+    """Pre-graduation section: brand-new pump.fun coins with traction, scored by the prelaunch models."""
+    b = load(os.path.join(DATA, "pre", "board.json"), None)
+    if not b or time.time() - b["updated"] > 1200:
+        print("\n🔮 Pre-graduation watch: no fresh scan (is com.dhruv.coinlaunch.pre running?)")
+        return
+    meta = load(os.path.join(HERE, "models", "pre_meta.json"), {})
+    labeled = b.get("labeled", 0)
+    if not meta.get("a_active") and not meta.get("b_active"):
+        print(f"\n🔮 Pre-graduation watch: NO RANKING YET. The graduation model needs live labels (a coin's outcome is known 4h+ after launch): "
+              f"{labeled} coins labeled so far, first training tomorrow 06:30. The explode-after-graduation model failed its held-out test (AUC {meta.get('trained', {}).get('b', {}).get('auc_test', 0):.2f}) and is off.")
+        rows = sorted(b["rows"], key=lambda r: -r["ret_15m"])[:6]
+        print("   Movers right now (NOT a prediction: sorted by 15-min move):")
+        for r in rows:
+            print(f"   {r['symbol'][:12]:<12} ${r['mc']:>7,}  {r['age_min']:>4.0f}m old  15m {r['ret_15m']:+.2f}  5m vol ${r['vol_5m']:,}  socials {r['socials']}  creator's past graduates {r['creator_prior_grads']}  {r['mint']}")
+        return
+    print(f"\n🔮 Pre-graduation watch (most likely to graduate{' and explode' if meta.get('b_active') else ''}), {dur(time.time() - b['updated'])} ago:")
+    for r in b["rows"][:10]:
+        pg = f"P(grad) {r['p_grad']:.0%}" if r["p_grad"] is not None else ""
+        pe = f"P(explode|grad) {r['p_explode']:.0%}" if r["p_explode"] is not None else ""
+        print(f"   {r['symbol'][:12]:<12} score {r['score']:.1%}  {pg} {pe}  ${r['mc']:>7,}  {r['age_min']:.0f}m old  {r['mint']}")
+
+
 def show_picks(cfg):
     """Default view since 2026-09-28: only coins with a good chance of +50% one hour after being
     added (plus50.py). Everything else is hidden; `agent.py --all` shows the full watcher board."""
@@ -458,6 +481,7 @@ def show_picks(cfg):
         now_mc = f"now {money(r['mc_now'])}" if r.get("mc_now") else ""
         print(f"🎯 {r['symbol'][:12]:<12} P {r['p']:.0%}  added {datetime.fromtimestamp(r['t_entry'] / 1000):%H:%M} at "
               f"{money(r['entry_mc'])}  {now_mc:<12} {res}\n   {r['token']}")
+    show_prelaunch()
     rec = d["live_record"]
     print(f"\nHidden: {len(day) - len(picks)} other coins added in the last 24h. "
           f"Live record so far: {rec['hits']}/{rec['picks']} picks hit +50%. `agent.py --all` = raw board.")

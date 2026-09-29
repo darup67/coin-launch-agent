@@ -57,6 +57,19 @@ Why: of 2,263 coins that reached $150k, the median was at 0.01x an hour later; m
 
 `plus50_email` in config.json emails each pick once (off while emails are paused).
 
+## Pre-graduation watch (2026-09-29)
+
+`prelaunch.py` scans brand-new pump.fun coins **before** they graduate and scores each for
+`P(graduate) x P(explode | graduate)`. It appears as the "🔮 Pre-graduation watch" section of `agent.py`.
+
+- **Discovery:** the newest ~600 coins from pump.fun's listing every 5 minutes, keeping those with traction (>= $5k market cap). pump.fun sustains roughly one request every 2.7 s (erratically), so the collector skips failed pages and overlaps ticks.
+- **Tracking:** each coin is followed by mint through the candles endpoint (no rate limit), snapshotted every tick while 6-120 min old, and labeled 4h+ after launch from its candles (graduated = reaches $75k within 4h; explode = the plus50 event).
+- **Stage A, P(graduate):** trained on our own live labeled snapshots (pump.fun's listing only reaches back ~55 min, so non-graduates can't be backfilled). Trains nightly at 06:30 once 60+ positives and 60+ negatives exist (about a day of collection). Used only if held-out test AUC >= 0.60.
+- **Stage B, P(explode | graduate):** trained from the ~4,000 cached graduates and their candles from launch. **Failed its test on 2026-09-29 (test AUC 0.44, about 20 exploding coins), so it is off**: pre-graduation behaviour doesn't tell us who explodes afterwards. The plus50 model still judges explosions at $150k.
+- **Until stage A is live** the section says "no ranking yet" and lists movers, clearly marked as not a prediction.
+- **Ledger:** once a model ranks, each coin's first time in the top 5 is graded 2h later (net of 3% costs) as product `prelaunch`.
+- Jobs: `com.dhruv.coinlaunch.pre` (every 5 min), `com.dhruv.coinlaunch.pretrain` (06:30). Report: `results/prelaunch_report.md`.
+
 ## Commands
 
 ```

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>com.dhruv.coinlaunch.pretrain</string>
+	<key>ProcessType</key><string>Background</string>
+	<key>ProgramArguments</key>
+	<array><string>/Users/dhruvpatel/.venvs/market-ml/bin/python</string><string>-u</string><string>/Users/dhruvpatel/coin-launch-agent/prelaunch.py</string><string>train</string></array>
+	<key>WorkingDirectory</key><string>/Users/dhruvpatel/coin-launch-agent</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>DYLD_FALLBACK_LIBRARY_PATH</key><string>/Users/dhruvpatel/.venvs/market-ml/lib/python3.11/site-packages/torch/lib</string>
+		<key>PATH</key><string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>TOKENIZERS_PARALLELISM</key><string>false</string>
+		<key>HF_HUB_OFFLINE</key><string>1</string>
+	</dict>
+	<key>StartCalendarInterval</key>
+	<array><dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer></dict></array>
+	<key>StandardOutPath</key><string>/Users/dhruvpatel/coin-launch-agent/pretrain.out.log</string>
+	<key>StandardErrorPath</key><string>/Users/dhruvpatel/coin-launch-agent/pretrain.err.log</string>
+</dict>
+</plist>

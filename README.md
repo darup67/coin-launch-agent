@@ -239,3 +239,9 @@ hold the raw records. No API key means it does nothing.
 
 `python3 prelaunch.py backup` = pack + commit + push `archive/` only. The watchdog starts `sweep.py` once a day after 03:00 and warns if the
 last sweep is 2+ days old or a push failed. `http.postBuffer` is set to 100 MB (GitHub answered HTTP 400 to pushes over 1 MB without it).
+
+## Closest-to-graduating list (2026-09-29)
+`data/pre/curves.json` keeps the latest on-chain curve reading for every coin read in the last 30 min (the board only holds the top 40 by model
+score, which left this list empty). `agent.py` ranks it by curve progress. A coin counts as a fresh graduation only if the scan watched its curve go
+from incomplete to complete (`watched: true`); coins first read already complete are reported separately. Market caps after migration are meaningless
+(the curve empties); the on-chain `complete` flag is the truth. `trades/5m` and `failed txs` show `?` when the public RPC skipped that call.

@@ -365,6 +365,7 @@ def tick():
     if rows:
         write_snaps(rows)
     save(COINS, coins)
+    update_curves(rows, coins)
     board = score_board(rows, coins)
     for r in board[:5]:
         if r["score"] is not None and "picked" not in coins[r["mint"]]:
@@ -461,6 +462,36 @@ def _predictor(path):
             from autogluon.tabular import TabularPredictor
             _models[path] = TabularPredictor.load(path, require_py_version_match=False)
     return _models[path]
+
+
+CURVES = os.path.join(PRE, "curves.json")
+
+
+def update_curves(rows, coins):
+    """Latest on-chain curve reading for EVERY coin seen (the board only shows the top 40 by model score, which
+    left the 'closest to graduating' list empty). Keeps coins read in the last 30 min; completed curves go to
+    a 24 h graduated list (the on-chain `complete` flag is the truth: after migration the API market cap collapses)."""
+    now = time.time() * 1000
+    d = load(CURVES, {"coins": {}, "graduated": []})
+    grads = {g["mint"]: g for g in d["graduated"] if now - g["t"] < 86400_000}
+    live = {m: v for m, v in d["coins"].items() if now - v["t"] < 30 * 60_000}
+    for r in rows:
+        cp = r.get("curve_progress")
+        if cp is None:
+            continue
+        m, c = r["mint"], coins.get(r["mint"], {})
+        if cp >= 0.999:
+            if m not in grads:
+                # a real graduation is one we watched go from incomplete to complete; a coin first read already
+                # complete graduated at an unknown time, so it is listed but not counted as a fresh event
+                grads[m] = {"mint": m, "symbol": c.get("symbol"), "t": int(r["t"]), "watched": m in live,
+                            "mins_after_launch": round((r["t"] - (r.get("created") or c.get("created") or r["t"])) / 60000, 1)}
+            live.pop(m, None)
+            continue
+        live[m] = {"mint": m, "symbol": c.get("symbol"), "t": int(r["t"]), "curve": round(float(cp), 3), "mc": round(float(r["mc"])),
+                   "age_min": round(float(r["age_min"]), 1), "trades_5m": r.get("n_trades_5m"), "fail_share": r.get("fail_share"),
+                   "ret_15m": round(float(r["ret_15m"]), 3), "socials": int(r["has_twitter"] + r["has_website"] + r["has_telegram"])}
+    save(CURVES, {"updated": time.time(), "coins": live, "graduated": sorted(grads.values(), key=lambda g: -g["t"])})
 
 
 def score_board(rows, coins):

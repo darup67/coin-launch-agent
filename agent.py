@@ -458,14 +458,17 @@ def show_prelaunch():
         print(f"\n🔮 Pre-graduation watch: NO RANKING YET. The graduation model needs live labels (a coin's outcome is known 4h+ after launch): "
               f"{labeled} coins labeled so far, first training tomorrow 06:30. The explode-after-graduation model failed its held-out test (AUC {meta.get('trained', {}).get('b', {}).get('auc_test', 0):.2f}) and is off.")
         cv = load(os.path.join(DATA, "pre", "curves.json"), {"coins": {}, "graduated": []})
-        rows = sorted(cv["coins"].values(), key=lambda r: -r["curve"])[:8]
+        # a coin's curve reading can be older than its snapshot; show its true age and drop readings over 20 min old
+        nowm = time.time() * 1000
+        fresh = {m: r for m, r in cv["coins"].items() if r.get("read_min_ago", 0) + (nowm - r["t"]) / 60000 <= 20}
+        rows = sorted(fresh.values(), key=lambda r: -r["curve"])[:8]
         if rows:
-            print(f"   Closest to graduating right now (bonding-curve progress read from the chain, {len(cv['coins'])} coins read in the last 30 min; a fact, NOT a prediction):")
+            print(f"   Closest to graduating right now (bonding-curve progress read from the chain, {len(fresh)} coins read in the last 20 min; a fact, NOT a prediction):")
             for r in rows:
                 tr = r["trades_5m"] if r["trades_5m"] is not None else "?"
                 fs = f"{int(100*r['fail_share']):>2}%" if r["fail_share"] is not None else " ?"
                 print(f"   {r['symbol'][:12]:<12} curve {100*r['curve']:5.1f}%  ${r['mc']:>7,}  {r['age_min']:>4.0f}m old  trades/5m {tr:>4}  "
-                      f"failed txs {fs}  15m {r['ret_15m']:+.2f}  socials {r['socials']}  {r['mint']}")
+                      f"failed txs {fs}  15m {r['ret_15m']:+.2f}  socials {r['socials']}  read {r.get('read_min_ago', 0) + (nowm - r['t']) / 60000:.0f}m ago  {r['mint']}")
                 print(feeds.links_line("solana", r["mint"]))
         else:
             rows = sorted(b["rows"], key=lambda r: -r["ret_15m"])[:6]

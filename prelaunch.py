@@ -254,15 +254,23 @@ def list_newest(budget_s=150):
     return out
 
 
-def refresh_onchain(coins, mints, budget_s=70):
+def refresh_onchain(coins, mints, budget_s=85):
     """Free Solana on-chain features for tracked coins, stalest first, within a time budget (the public RPC is
     paced to ~4.5 calls/s; 3 dynamic calls per coin plus 2 static calls the first time we see it)."""
     todo = [m for m in mints if coins[m]["meta"].get("bonding_curve")]
-    # near-graduation coins first (their curve moves fastest and matters most), then never-read coins, then the stalest;
-    # before 2026-09-29 the never-read coins used the whole budget and a coin at 87% went 23 min without a refresh
+    # 1) coins close to graduating (curve >= 75%, the 20 closest: their curve moves fastest and matters most),
+    # 2) never-read coins, newest first (their early features are the training data), 3) the stalest of the rest.
+    # First version put every coin >= 50% (65 of them) in tier 1, which starved 141 never-read coins.
+    def cp_of(m):
+        return (coins[m].get("oc_dyn") or {}).get("curve_progress") or 0
+    close = set(sorted((m for m in todo if cp_of(m) >= 0.75), key=lambda m: -cp_of(m))[:20])
+
     def prio(m):
-        cp = (coins[m].get("oc_dyn") or {}).get("curve_progress") or 0
-        return (0 if cp >= 0.5 else 1 if not coins[m].get("oc_t") else 2, coins[m].get("oc_t", 0))
+        if m in close:
+            return (0, coins[m].get("oc_t", 0))
+        if not coins[m].get("oc_t"):
+            return (1, -coins[m]["created"])
+        return (2, coins[m].get("oc_t", 0))
     todo.sort(key=prio)
     deadline = time.time() + budget_s
 

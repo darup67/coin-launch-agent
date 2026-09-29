@@ -258,7 +258,12 @@ def refresh_onchain(coins, mints, budget_s=70):
     """Free Solana on-chain features for tracked coins, stalest first, within a time budget (the public RPC is
     paced to ~4.5 calls/s; 3 dynamic calls per coin plus 2 static calls the first time we see it)."""
     todo = [m for m in mints if coins[m]["meta"].get("bonding_curve")]
-    todo.sort(key=lambda m: coins[m].get("oc_t", 0))
+    # near-graduation coins first (their curve moves fastest and matters most), then never-read coins, then the stalest;
+    # before 2026-09-29 the never-read coins used the whole budget and a coin at 87% went 23 min without a refresh
+    def prio(m):
+        cp = (coins[m].get("oc_dyn") or {}).get("curve_progress") or 0
+        return (0 if cp >= 0.5 else 1 if not coins[m].get("oc_t") else 2, coins[m].get("oc_t", 0))
+    todo.sort(key=prio)
     deadline = time.time() + budget_s
 
     def one(m):
@@ -489,7 +494,7 @@ def update_curves(rows, coins):
             live.pop(m, None)
             continue
         live[m] = {"mint": m, "symbol": c.get("symbol"), "t": int(r["t"]), "curve": round(float(cp), 3), "mc": round(float(r["mc"])),
-                   "age_min": round(float(r["age_min"]), 1), "trades_5m": r.get("n_trades_5m"), "fail_share": r.get("fail_share"),
+                   "age_min": round(float(r["age_min"]), 1), "read_min_ago": round(float(r.get("oc_age_min") or 0), 1), "trades_5m": r.get("n_trades_5m"), "fail_share": r.get("fail_share"),
                    "ret_15m": round(float(r["ret_15m"]), 3), "socials": int(r["has_twitter"] + r["has_website"] + r["has_telegram"])}
     save(CURVES, {"updated": time.time(), "coins": live, "graduated": sorted(grads.values(), key=lambda g: -g["t"])})
 

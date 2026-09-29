@@ -219,7 +219,7 @@ FEATURES = CANDLE_KEYS + STATIC_KEYS
 # Free on-chain features (onchain.py), available for live snapshots only (no history to backfill): used by stage A.
 ONCHAIN_KEYS = ["curve_progress", "curve_sol", "n_trades", "n_trades_5m", "n_trades_15m", "fail_share", "first_slot_txs",
                 "unique_slots", "creator_share", "creator_sold", "mint_authority", "freeze_authority", "n_extensions",
-                "creator_txs", "creator_wallet_age_h", "oc_age_min"]
+                "creator_txs", "creator_wallet_age_h", "oc_age_min", "curve_std", "curve_k_ratio"]
 FEATURES_A = FEATURES + ONCHAIN_KEYS
 
 
@@ -494,7 +494,7 @@ def update_curves(rows, coins):
             live.pop(m, None)
             continue
         live[m] = {"mint": m, "symbol": c.get("symbol"), "t": int(r["t"]), "curve": round(float(cp), 3), "mc": round(float(r["mc"])),
-                   "age_min": round(float(r["age_min"]), 1), "read_min_ago": round(float(r.get("oc_age_min") or 0), 1), "trades_5m": r.get("n_trades_5m"), "fail_share": r.get("fail_share"),
+                   "age_min": round(float(r["age_min"]), 1), "read_min_ago": round(float(r.get("oc_age_min") or 0), 1), "std": r.get("curve_std"), "trades_5m": r.get("n_trades_5m"), "fail_share": r.get("fail_share"),
                    "ret_15m": round(float(r["ret_15m"]), 3), "socials": int(r["has_twitter"] + r["has_website"] + r["has_telegram"])}
     save(CURVES, {"updated": time.time(), "coins": live, "graduated": sorted(grads.values(), key=lambda g: -g["t"])})
 

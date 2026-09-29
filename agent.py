@@ -461,14 +461,16 @@ def show_prelaunch():
         # a coin's curve reading can be older than its snapshot; show its true age and drop readings over 20 min old
         nowm = time.time() * 1000
         fresh = {m: r for m, r in cv["coins"].items() if r.get("read_min_ago", 0) + (nowm - r["t"]) / 60000 <= 20}
-        rows = sorted(fresh.values(), key=lambda r: -r["curve"])[:8]
+        # standard pump.fun curves first; custom curves (tiny virtual SOL, can finish for ~1 SOL) are flagged and ranked below them
+        rows = sorted(fresh.values(), key=lambda r: (r.get("std") == 0, -r["curve"]))[:8]
         if rows:
             print(f"   Closest to graduating right now (bonding-curve progress read from the chain, {len(fresh)} coins read in the last 20 min; a fact, NOT a prediction):")
             for r in rows:
                 tr = r["trades_5m"] if r["trades_5m"] is not None else "?"
                 fs = f"{int(100*r['fail_share']):>2}%" if r["fail_share"] is not None else " ?"
                 print(f"   {r['symbol'][:12]:<12} curve {100*r['curve']:5.1f}%  ${r['mc']:>7,}  {r['age_min']:>4.0f}m old  trades/5m {tr:>4}  "
-                      f"failed txs {fs}  15m {r['ret_15m']:+.2f}  socials {r['socials']}  read {r.get('read_min_ago', 0) + (nowm - r['t']) / 60000:.0f}m ago  {r['mint']}")
+                      f"failed txs {fs}  15m {r['ret_15m']:+.2f}  socials {r['socials']}  read {r.get('read_min_ago', 0) + (nowm - r['t']) / 60000:.0f}m ago"
+                      f"{'  ⚠ CUSTOM CURVE: % not comparable, can finish for ~1 SOL' if r.get('std') == 0 else ''}  {r['mint']}")
                 print(feeds.links_line("solana", r["mint"]))
         else:
             rows = sorted(b["rows"], key=lambda r: -r["ret_15m"])[:6]

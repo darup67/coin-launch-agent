@@ -68,6 +68,7 @@ Why: of 2,263 coins that reached $150k, the median was at 0.01x an hour later; m
 - **Stage B, P(explode | graduate):** trained from the ~4,000 cached graduates and their candles from launch. **Failed its test on 2026-09-29 (test AUC 0.44, about 20 exploding coins), so it is off**: pre-graduation behaviour doesn't tell us who explodes afterwards. The plus50 model still judges explosions at $150k.
 - **Until stage A is live** the section says "no ranking yet" and lists movers, clearly marked as not a prediction.
 - **Ledger:** once a model ranks, each coin's first time in the top 5 is graded 2h later (net of 3% costs) as product `prelaunch`.
+- **Coinbase CDP SQL API (optional, free tier):** `cdp_sql.py` can query Solana SPL Token / Token-2022 transfers (about 3 months of history) to add holder, early-buyer and dev-sold features and to backfill coins that never graduated. It needs a free CDP Client API key (`python3 cdp_sql.py --set-key`, stored in the Keychain). It is capped at 900 queries a month (the free tier is 1,000; overage is $0.0083 each) and never uses x402 or any wallet. `--probe` discovers the real table schema first; nothing else is built on it until the schema is known.
 - Jobs: `com.dhruv.coinlaunch.pre` (every 5 min), `com.dhruv.coinlaunch.pretrain` (06:30). Report: `results/prelaunch_report.md`.
 
 ## Commands

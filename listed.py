@@ -449,6 +449,32 @@ def watcher_check(v):
     return {"tracked": len(tracked), "hits": len(hits), "listed_hits": sup_hits, "listed_tracked": sup_tracked}
 
 
+SENT = os.path.join(DATA, "sentiment", "latest.json")
+
+
+def sent_all():
+    """(tokens, meta) from sentiment.py's latest readings; readings older than 3 hours are ignored."""
+    d = load(SENT, {})
+    return {k: t for k, t in d.get("tokens", {}).items() if t.get("score") is not None and time.time() - t.get("t", 0) < 3 * 3600}, d
+
+
+def sent_compact(t):
+    if not t:
+        return None
+    return {"score": t["score"], "label": t["label"], "talk": t.get("talk"), "conf": t.get("confidence"), "rel": t.get("rel"), "src": t.get("sources"), "n": t.get("n_posts"), "fomo": t.get("fomo"),
+            "top": ((t.get("raw") or {}).get("news") or {}).get("top", [])[:1]}
+
+
+def sent_txt(x, short=False):
+    if not x:
+        return "no reading"
+    rel = f", {x['rel']:+d} vs typical" if x.get("rel") is not None and not short else ""
+    talk = f" · {x['talk']}" if x.get("talk") else ""
+    fo = x.get("fomo")
+    fom = f" · FOMO {fo['index']} {fo['label'].lower()}" if fo and fo["index"] >= 35 else ""
+    return f"{x['label']} {x['score']:+d}{talk}{fom} ({x['conf']}{rel})"
+
+
 def links(sym, cb, rh, chain=None, addr=None):
     out = {}
     if cb:
@@ -517,11 +543,18 @@ def scan(quiet=False):
             rd = radar(v, c)
         except Exception as e:
             print("radar error", repr(e), file=sys.stderr)
+    toks, smeta = sent_all()
+    for r in rows:
+        r["sentiment"] = sent_compact(toks.get(r["symbol"]))
+    if rd and rd.get("rows"):
+        for r in rd["rows"]:
+            r["sentiment"] = sent_compact(toks.get(r["symbol"]))
     for r in rows:
         r["links"] = links(r["symbol"], r["coinbase"], r["robinhood"], r.get("chain"), r.get("address"))
     rows.sort(key=lambda r: (-int(r["clean"]), -r["score"]))
     out = {"updated": now, "universe": len(rows), "thresholds": c, "excluded_chain_unverified": sorted(off_chain),
            "listings": [e for e in events if time.time() - e["t"] < 14 * 86400], "watcher": wc, "radar": rd,
+           "sentiment_meta": {"covered": sum(1 for r in rows if r.get("sentiment")), "fear_greed": smeta.get("fear_greed"), "market_median": smeta.get("market_median"), "updated": smeta.get("updated")},
            "chains": {"coinbase": len(v.get("coinbase_networks", {})), "robinhood": len(v.get("robinhood_networks", {})), "allowed": len(ok_chains)},
            "counts": {"clean": sum(r["clean"] for r in rows), "A_only": sum(r["A"] and not r["B"] for r in rows), "B_only": sum(r["B"] and not r["A"] for r in rows)},
            "rows": rows}
@@ -536,8 +569,22 @@ def _ago(t):
     return f"{d / 3600:.1f}h ago" if d < 86400 else f"{d / 86400:.1f}d ago"
 
 
+def show_sentiment(b):
+    sm = b.get("sentiment_meta") or {}
+    rows = [r for r in b["rows"] if r.get("sentiment")]
+    fg = sm.get("fear_greed")
+    print(f"\nSocial sentiment (StockTwits crowd tags, Google News, Reddit, CoinGecko votes, Telegram): {len(rows)} of {b['universe']} listed tokens covered"
+          + (f" · market mood: Fear & Greed {fg['value']} ({fg['label']})" if fg else "") + (f" · typical coin {sm['market_median']:+d}" if sm.get("market_median") is not None else ""))
+    if rows:
+        top = sorted(rows, key=lambda r: -r["sentiment"]["rel"] if r["sentiment"].get("rel") is not None else -r["sentiment"]["score"])
+        for title, group in (("most bullish vs typical", top[:5]), ("most bearish vs typical", top[::-1][:5])):
+            print(f"  {title}: " + ", ".join(f"{r['symbol']} {r['sentiment']['score']:+d}{' ' + r['sentiment']['talk'] if r['sentiment'].get('talk') else ''}" for r in group))
+    print("  X/Twitter is not connected (no free tier; `sentiment.py --set-key x` if you want it, capped at 3,000 post reads a month), and Discord and the Fomo app have no public API. FOMO = heat gauge, 60+ is FOMO BUILDING. Sentiment is talk, not a validated signal (`sentiment.py evidence` tests it).")
+
+
 def show_extras(b):
-    """Watcher check, new listings, and the separate radar."""
+    """Sentiment, watcher check, new listings, and the separate radar."""
+    show_sentiment(b)
     w = b.get("watcher")
     if w is not None:
         print(f"\nOriginal watcher (unchanged parameters): tracking {w['tracked']} tokens, {w['hits']} hits so far; "
@@ -565,7 +612,7 @@ def show_extras(b):
         for r in (clean or rows)[:5]:
             on = ", ".join(r["other_exchanges"]) or ("no other exchange found" if r["cg_verified"] else "exchange match unverified")
             tag = "A+B" if r["clean"] else ("A" if r["A"] else "B" if r["B"] else "-")
-            print(f"  {r['symbol']:<9} {tag:<3} 24h {_pct(r['ret_24h'])}  worst dip {r['max_drawdown']:.1%}  mcap ${r['mcap']:,.0f}  liq ${r['liq']:,.0f}  {r['age_days']}d old  also on: {on}")
+            print(f"  {r['symbol']:<9} {tag:<3} 24h {_pct(r['ret_24h'])}  worst dip {r['max_drawdown']:.1%}  mcap ${r['mcap']:,.0f}  liq ${r['liq']:,.0f}  {r['age_days']}d old  also on: {on}  social: {sent_txt(r.get('sentiment'), True)}")
             print("    🔗 " + " · ".join(f"{k} {u}" for k, u in r["links"].items()))
 
 
@@ -594,7 +641,7 @@ def show(b=None, top=8):
         near = [r for r in b["rows"] if r["A"] or r["B"]][:5]
         for r in near:
             tag = "running, not holding" if r["A"] else "holding, not running"
-            print(f"  {r['symbol']:<9} {tag:<22} 24h {_pct(r['ret_24h'])}  6h {_pct(r['ret_6h'])}  worst dip {r['max_drawdown']:.1%}  off high {r['off_high']:.1%}  score {r['score']}")
+            print(f"  {r['symbol']:<9} {tag:<22} 24h {_pct(r['ret_24h'])}  6h {_pct(r['ret_6h'])}  worst dip {r['max_drawdown']:.1%}  off high {r['off_high']:.1%}  score {r['score']}  social: {sent_txt(r.get('sentiment'), True)}")
     for r in clean:
         venue = "+".join(n for n, on in (("Coinbase", r["coinbase"]), ("Robinhood", r["robinhood"])) if on)
         mc = f"  mcap ${r['mcap']:,.0f}" if r.get("mcap") else ""
@@ -602,6 +649,7 @@ def show(b=None, top=8):
         halt = f"  (Robinhood halted in {', '.join(r['halted'])})" if r["halted"] and r["robinhood"] else ""
         print(f"  {r['symbol']:<9} score {r['score']:>3}  24h {_pct(r['ret_24h'])}  6h {_pct(r['ret_6h'])}  up-hours {r['up_hours']:.0%}  R² {r['r2']:.2f}  "
               f"worst dip {r['max_drawdown']:.1%}  off high {r['off_high']:.1%}{mc}{since}  [{venue}]{halt}")
+        print(f"    social: {sent_txt(r.get('sentiment'))}")
         print("    🔗 " + " · ".join(f"{k} {u}" for k, u in r["links"].items()))
     show_extras(b)
 
@@ -616,19 +664,21 @@ def email_spec(b):
     def venue(r):
         return " + ".join(n for n, on in (("Coinbase", r["coinbase"]), ("Robinhood", r["robinhood"])) if on)
     main_rows = [{"sym": {"v": r["symbol"], "bold": True, "href": (r["links"].get("Coinbase") or r["links"].get("Robinhood"))}, "venue": venue(r),
-                  "d24": {"v": _pct(r["ret_24h"]), "tone": "good"}, "d6": _pct(r["ret_6h"]), "up": f"{r['up_hours']:.0%}", "dip": f"{r['max_drawdown']:.1%}", "off": f"{r['off_high']:.1%}",
-                  "mc": f"${r['mcap'] / 1e6:,.0f}M" if r.get("mcap") else "n/a", "since": f"{(time.time() - r['clean_since']) / 3600:.1f}h" if r.get("clean_since") else ""} for r in clean]
+                  "d24": {"v": _pct(r["ret_24h"]), "tone": "good"}, "up": f"{r['up_hours']:.0%}", "dip": f"{r['max_drawdown']:.1%}",
+                  "mc": f"${r['mcap'] / 1e6:,.0f}M" if r.get("mcap") else "n/a", "soc": sent_cell(r.get("sentiment")),
+                  "since": f"{(time.time() - r['clean_since']) / 3600:.1f}h" if r.get("clean_since") else ""} for r in clean]
     near = [r for r in b["rows"] if (r["A"] or r["B"]) and not r["clean"]][:6]
-    near_rows = [{"sym": {"v": r["symbol"], "bold": True}, "why": "running, not holding" if r["A"] else "holding, not running", "d24": _pct(r["ret_24h"]), "dip": f"{r['max_drawdown']:.1%}", "off": f"{r['off_high']:.1%}", "score": str(r["score"])} for r in near]
+    near_rows = [{"sym": {"v": r["symbol"], "bold": True}, "why": "running, not holding" if r["A"] else "holding, not running", "d24": _pct(r["ret_24h"]), "dip": f"{r['max_drawdown']:.1%}", "soc": sent_cell(r.get("sentiment")), "score": str(r["score"])} for r in near]
     secs = [{"blocks": [{"type": "kpis", "items": [{"label": "Pass both tests", "value": str(cn["clean"]), "tone": "good" if cn["clean"] else None, "sub": f"of {b['universe']} scored"},
                                                   {"label": "Running only", "value": str(cn["A_only"]), "sub": "not holding yet"}, {"label": "Holding only", "value": str(cn["B_only"]), "sub": "not running"}]}]},
             {"title": "Listed tokens rising fast and steadily, and holding", "note": "Only tokens listed on Coinbase or Robinhood on a supported blockchain are shown. Symbol links open the exchange page.",
-             "blocks": [tbl([{"key": "sym", "label": "Token"}, {"key": "venue", "label": "Listed on"}, {"key": "d24", "label": "24h", "align": "right"}, {"key": "d6", "label": "6h", "align": "right"},
-                             {"key": "up", "label": "Up-hours", "align": "right"}, {"key": "dip", "label": "Worst dip", "align": "right"}, {"key": "off", "label": "Off high", "align": "right"},
-                             {"key": "mc", "label": "Market cap", "align": "right"}, {"key": "since", "label": "Clean for", "align": "right"}], main_rows, "Nothing passes both tests right now.")]}]
+             "blocks": [tbl([{"key": "sym", "label": "Token"}, {"key": "venue", "label": "Listed on"}, {"key": "d24", "label": "24h", "align": "right"},
+                             {"key": "up", "label": "Up-hours", "align": "right"}, {"key": "dip", "label": "Worst dip", "align": "right"},
+                             {"key": "mc", "label": "Market cap", "align": "right"}, {"key": "soc", "label": "Social sentiment"}, {"key": "since", "label": "Clean for", "align": "right"}], main_rows, "Nothing passes both tests right now.")]}]
     if not clean and near_rows:
         secs.append({"title": "Closest to passing", "blocks": [tbl([{"key": "sym", "label": "Token"}, {"key": "why", "label": "Status"}, {"key": "d24", "label": "24h", "align": "right"}, {"key": "dip", "label": "Worst dip", "align": "right"},
-                                                                  {"key": "off", "label": "Off high", "align": "right"}, {"key": "score", "label": "Score", "align": "right"}], near_rows, "")]})
+                                                                  {"key": "soc", "label": "Social sentiment"}, {"key": "score", "label": "Score", "align": "right"}], near_rows, "")]})
+    secs.append(sentiment_section(b))
     w = b.get("watcher")
     if w is not None:
         secs.append({"title": "Original coin watcher (unchanged parameters)", "blocks": [{"type": "para", "text": f"Tracking {w['tracked']} new Solana and Base tokens and {w['hits']} hits so far. {len(w['listed_hits']) + len(w['listed_tracked'])} of them are listed on Coinbase or Robinhood (matched by contract address)."}]})
@@ -640,11 +690,11 @@ def email_spec(b):
     if rd and rd.get("rows") is not None:
         rows = rd["rows"]
         rr = [{"sym": {"v": r["symbol"], "bold": True, "href": r["links"].get("DexScreener")}, "tag": {"v": "A+B" if r["clean"] else "A" if r["A"] else "B" if r["B"] else "none", "tone": "good" if r["clean"] else "neutral"},
-               "d24": _pct(r["ret_24h"]), "dip": f"{r['max_drawdown']:.1%}", "mc": f"${r['mcap'] / 1e6:,.0f}M", "age": f"{r['age_days']}d",
+               "d24": _pct(r["ret_24h"]), "dip": f"{r['max_drawdown']:.1%}", "mc": f"${r['mcap'] / 1e6:,.0f}M", "age": f"{r['age_days']}d", "soc": sent_cell(r.get("sentiment")),
                "on": ", ".join(r["other_exchanges"]) or ("none found" if r["cg_verified"] else "unverified")} for r in ((rd["rows"] and [x for x in rows if x["clean"]]) or rows)[:6]]
         secs.append({"title": "Radar: unlisted tokens that could be listed later", "note": f"{rd['candidates']} heavy-volume Solana and Base tokens screened. NOT on Coinbase or Robinhood today, so not buyable there. Kept separate from the list above.",
                      "blocks": [tbl([{"key": "sym", "label": "Token"}, {"key": "tag", "label": "Tests"}, {"key": "d24", "label": "24h", "align": "right"}, {"key": "dip", "label": "Worst dip", "align": "right"},
-                                     {"key": "mc", "label": "Market cap", "align": "right"}, {"key": "age", "label": "Age", "align": "right"}, {"key": "on", "label": "Also on"}], rr, "Nothing screened.")]})
+                                     {"key": "mc", "label": "Market cap", "align": "right"}, {"key": "age", "label": "Age", "align": "right"}, {"key": "soc", "label": "Social sentiment"}, {"key": "on", "label": "Also on"}], rr, "Nothing screened.")]})
     secs.append({"title": "How the tests work", "blocks": [{"type": "list", "items": [
         f"Rising fast: +{c['fast_gain_6h']:.0%} in 6 hours or +{c['fast_gain_24h']:.0%} in 24 hours. Steady: up in at least {c['min_up_hours']:.0%} of hours, a near-straight rising line (R² at least {c['min_r2']}), and no single hour above {c['max_spike_share']:.0%} of the gain.",
         f"Holding: the worst dip in the last {c['hold_hours']} hours is at most {c['max_drawdown']:.0%} and the price is within {c['max_off_high']:.0%} of its 24-hour high.",
@@ -654,6 +704,41 @@ def email_spec(b):
             "title": "Coin Detector: Coinbase and Robinhood Tokens Rising Fast and Steadily, and Holding",
             "subtitle": f"{time.strftime('%A %b %-d, %-I:%M %p')} · {b['universe']} listed tokens scored on {ch.get('allowed', '?')} supported blockchains",
             "sections": secs, "footer": "Sent by the Coin Launch Agent (~/coin-launch-agent, listed.py)."}
+
+
+def sent_cell(x):
+    """Table cell: label + score, coloured bull / bear."""
+    if not x:
+        return {"v": "no reading", "tone": "neutral"}
+    tone = "good" if x["score"] >= 12 else "bad" if x["score"] <= -12 else "neutral"
+    fo = x.get("fomo")
+    fom = f" · FOMO {fo['index']}" if fo and fo["index"] >= 35 else ""
+    return {"v": f"{x['label']} {x['score']:+d}" + (f" · {x['talk']}" if x.get("talk") else "") + fom + f" ({x['conf']})", "tone": tone, "bold": bool(x.get("talk")) or bool(fo and fo["index"] >= 60)}
+
+
+def sentiment_section(b):
+    sm = b.get("sentiment_meta") or {}
+    rows = [r for r in b["rows"] if r.get("sentiment")]
+    fg = sm.get("fear_greed")
+    xs = load(SENT, {}).get("x", {})
+    kp = [{"label": "Tokens covered", "value": f"{len(rows)} / {b['universe']}", "sub": "listed tokens with a fresh reading"}]
+    if fg:
+        kp.append({"label": "Market mood", "value": f"{fg['value']}", "sub": f"Fear & Greed: {fg['label']}", "tone": "good" if fg["value"] >= 60 else "bad" if fg["value"] <= 40 else None})
+    if sm.get("market_median") is not None:
+        kp.append({"label": "Typical coin", "value": f"{sm['market_median']:+d}", "sub": "StockTwits skews bullish"})
+    key = lambda r: -(r["sentiment"]["rel"] if r["sentiment"].get("rel") is not None else r["sentiment"]["score"])
+    def tbl_rows(group):
+        return [{"sym": {"v": r["symbol"], "bold": True}, "read": sent_cell(r["sentiment"]), "rel": f"{r['sentiment']['rel']:+d}" if r["sentiment"].get("rel") is not None else "",
+                 "src": ", ".join(r["sentiment"].get("src") or []), "n": str(r["sentiment"].get("n") or ""), "head": ((r["sentiment"].get("top") or [""])[0])[:90]} for r in group]
+    cols = [{"key": "sym", "label": "Token"}, {"key": "read", "label": "Reading"}, {"key": "rel", "label": "vs typical", "align": "right"}, {"key": "src", "label": "Sources"},
+            {"key": "n", "label": "Posts", "align": "right"}, {"key": "head", "label": "Top headline"}]
+    blocks = [{"type": "kpis", "items": kp},
+              {"type": "table", "empty": "No readings yet.", "columns": cols, "rows": tbl_rows(sorted(rows, key=key)[:6])},
+              {"type": "table", "empty": "", "columns": cols, "rows": tbl_rows(sorted(rows, key=key)[::-1][:6])} if len(rows) > 6 else {"type": "para", "text": ""},
+              {"type": "callout", "tone": "info", "text": "Score runs -100 (dump talk) to +100 (pump talk): StockTwits posts tagged Bullish or Bearish by their authors (40%), Google News headlines (20%), Reddit posts (15%), CoinGecko holder votes (15%), Telegram channel posts (10%). "
+                   "PUMP TALK or DUMP TALK means posting volume is at least twice the token's own baseline. FOMO is a separate 0-100 heat gauge (post-rate surge, StockTwits trending, price momentum and acceleration, headline surge, near-unanimous bullish tags); 60 or more reads FOMO BUILDING. It describes how hot the crowd is, not what happens next. "
+                   + ("X/Twitter is connected" if xs.get("connected") else "X/Twitter is NOT connected (X has no free tier; pay-per-use is about $0.005 per post read, so it needs your key and a spending cap)") + ". Discord and the Fomo trading app have no public API. This is a reading of talk, not a validated signal: every reading is logged and tested against the price that followed."}]
+    return {"title": "Social sentiment: what people are saying about these tokens", "note": "First table: most bullish compared with the typical coin. Second: most bearish.", "blocks": blocks}
 
 
 def send_report(test=False):

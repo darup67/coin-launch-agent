@@ -12,7 +12,7 @@ Read-only: it never trades and holds no keys. It records nothing except a
 dedupe list of what already alerted (data/state.json, pruned to 24h) and the
 current board (data/live.json, overwritten every cycle).
 """
-import json, os, sys, subprocess, time
+import re, json, os, sys, subprocess, time
 from collections import deque
 from datetime import datetime
 
@@ -265,8 +265,12 @@ class Watcher:
                        self.cfg["alerts"], speak=f"Coinbase just listed {b}",
                        detail=f"New Coinbase Exchange product(s): {pairs} (status {status})")
                 if self.cfg.get("coinbase_listing_email") and not self.cfg["alerts"].get("email"):
-                    send_email(f"Coinbase lists {b}: {', '.join(pairs)}",
-                               f"New Coinbase Exchange product(s): {pairs} (status {status})")
+                    send_email(f"Coin Launch Agent · Coinbase listing: {b}", "", {"kind": "Listing alert · Coinbase", "status": {"text": status.upper() or "NEW", "tone": "info"},
+                               "title": f"Coinbase Just Listed {b}", "subtitle": f"New Coinbase Exchange product(s): {', '.join(pairs)}",
+                               "sections": [{"title": "Listing", "blocks": [{"type": "table", "noHeader": True, "columns": [{"key": "k", "label": ""}, {"key": "v", "label": ""}],
+                                             "rows": [{"k": {"v": "Asset", "bold": True}, "v": b}, {"k": {"v": "Trading pairs", "bold": True}, "v": ", ".join(pairs)}, {"k": {"v": "Status", "bold": True}, "v": status}]},
+                                            {"type": "callout", "tone": "info", "text": "New listings often open in limit-only or auction mode first. Check the product status before trading."}]}],
+                               "footer": "Sent by the Coin Launch Agent (~/coin-launch-agent)."})
         self.cb_bases = bases
 
     # ---- output ----------------------------------------------------------------
@@ -362,18 +366,19 @@ def notify(title, body, cfg, speak="", detail=""):
         send_email(title, detail or body)
 
 
-def send_email(subject, body):
-    """Gmail via flip-notifier's sender; the app password comes from Keychain, as there."""
+def send_email(subject, body, spec=None):
+    """Email through the shared layout (~/flip-notifier/email-ui.js). `spec` = a designed layout; otherwise the plain text is shown as
+    a titled message, so no email is ever a bare text dump."""
     try:
-        pw = subprocess.run(["/usr/bin/security", "find-generic-password", "-a", "darup67@gmail.com",
-                             "-s", "flip-notifier-gmail", "-w"],
-                            capture_output=True, text=True, timeout=10).stdout.strip()
-        r = subprocess.run([os.path.expanduser("~/.local/bin/node"), os.path.expanduser("~/flip-notifier/send-email.js"), subject, body],
-                           capture_output=True, text=True, timeout=40,
-                           env={**os.environ, "FLIP_GMAIL_APP_PASSWORD": pw, "SEND_EMAIL_TIMEOUT_MS": "35000"})
-        if r.returncode:
-            log(f"email failed: {r.stderr.strip()[-200:]}")
-        return r.returncode == 0
+        sys.path.insert(0, os.path.expanduser("~/flip-notifier"))
+        import email_ui
+        if spec is None:
+            spec = {"kind": "Coin watcher", "title": re.sub(r"^[^\w$]+", "", subject), "subtitle": f"{datetime.now():%A %b %-d, %-I:%M %p} ET",
+                    "sections": [{"blocks": [{"type": "code", "text": body}]}], "footer": "Sent by the Coin Launch Agent (~/coin-launch-agent)."}
+        ok = email_ui.send(subject, spec)
+        if not ok:
+            log("email failed")
+        return ok
     except Exception as e:
         log(f"email failed: {e!r}")
         return False
@@ -406,18 +411,34 @@ def send_digest(hits):
             + (f"    {jl}\n" if jl else "")
             + f"    {h['url']}\n")
     first, last = hits[0]["at"], hits[-1]["at"]
-    subject = (f"Coin launch digest: {len(hits)} new coins over threshold "
+    subject = (f"Coin Launch Agent · Launch digest: {len(hits)} new coins over threshold "
                f"({datetime.fromtimestamp(first):%b %d %I:%M %p} to {datetime.fromtimestamp(last):%I:%M %p})")
-    body = ("New Solana and Base coins that crossed the market-cap threshold within 4h of launch and "
-            "passed the liquidity, buyer and honeypot filters.\n"
-            "To buy in the Coinbase app, search by contract address (onchain trading covers Solana and Base; "
-            "a given token can still be missing there).\n\n" + "\n".join(lines)
-            + ("\nJev lines are an unvalidated read of the coin's name and description; "
-               "`python jev_shadow.py` shows whether they have predicted anything yet.\n"
-               if cfg_jev_in_digest() else "")
-            + "\nMost of these go to zero. An alert is a coin crossing a line, not a buy signal.\n"
-            "- coin-launch-agent (~/coin-launch-agent)")
-    ok = send_email(subject, body)
+    body = ""
+    cards = []
+    for i, h in enumerate(hits, 1):
+        now_mc = None
+        try:
+            pairs = feeds.ds_token_pairs(h["net"], h["token"])
+            amm = [p for p in pairs if p["liq"] > 0]
+            if amm:
+                now_mc = max(amm, key=lambda p: p["liq"])["mc"]
+        except Exception:
+            pass
+        chg = f" ({(now_mc / h['mc'] - 1) * 100:+.0f}%)" if now_mc and h["mc"] else ""
+        chain = "Solana" if h["net"] == "solana" else h["net"].capitalize()
+        jl = jev_shadow.digest_line(f"{h['net']}:{h['token']}") if cfg_jev_in_digest() else ""
+        cards.append({"title": h["symbol"], "badge": {"text": h["stage"].upper(), "tone": "info"},
+                      "sub": f"{chain} · alerted {datetime.fromtimestamp(h['at']):%b %d %I:%M %p} at {money(h['mc'])}, {dur(h['age'])} after launch",
+                      "fields": [["Now", f"{money(now_mc)}{chg}"], ["Liquidity", money(h["liq"])], ["Buys / sells 1h", f"{h['buys']} / {h['sells']}"]],
+                      "lines": [f"Contract {h['token']}"] + ([jl] if jl else []),
+                      "links": [{"label": k, "href": u} for k, u in feeds.links("solana" if h["net"] == "solana" else "base", h["token"]).items()]})
+    spec = {"kind": "Digest · New coin launches", "status": {"text": f"{len(hits)} coins", "tone": "info"},
+            "title": f"New Coin Launches Over the Market-Cap Threshold: {len(hits)} Solana and Base Coins",
+            "subtitle": "Crossed the market-cap threshold within 4 hours of launch and passed the liquidity, buyer and honeypot filters.",
+            "sections": [{"title": "Coins", "blocks": [{"type": "cards", "items": cards}]},
+                         {"title": "Read this first", "blocks": [{"type": "callout", "tone": "warn", "text": "Most of these go to zero. An alert is a coin crossing a line, not a buy signal. New launches are not listed on Coinbase or Robinhood; the Coinbase Wallet link opens a swap for the contract address, and a given token can still be missing there."}]}],
+            "footer": "Sent by the Coin Launch Agent (~/coin-launch-agent)."}
+    ok = send_email(subject, body, spec)
     log(f"digest email {'sent' if ok else 'FAILED, will retry on the next hit'}: {len(hits)} coins")
     return ok
 

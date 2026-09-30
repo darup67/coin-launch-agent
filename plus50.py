@@ -333,14 +333,16 @@ def email_picks(picks, st, meta):
         return
     import agent
     gt = meta.get("gate_test") or {}
-    lines = [f"{j['symbol']}  P(+50% in 1h) {j['p']:.0%}  added at ${j['entry_mc'] / 1000:,.0f}k  "
-             f"{datetime.fromtimestamp(j['t_entry'] / 1000):%I:%M %p}\n    contract {tok}\n"
-             f"{agent.feeds.links_line('solana', tok, '    ')}\n" for tok, j in picks]
-    body = (f"Coins with a good chance of +50% one hour after being added. On held-out coins, picks at this "
-            f"score hit +50% {gt.get('hit') or 0:.0%} of the time (base rate {meta.get('base_rate_test') or 0:.0%}); "
-            f"median 1h multiple {gt.get('median_end_mult') or 0:.2f}x, before fees and slippage.\n\n" + "\n".join(lines) +
-            "\nNot advice. results/plus50_report.md has the full numbers.")
-    if agent.send_email(f"🎯 +50% candidates: {', '.join(j['symbol'] for _, j in picks)}", body):
+    cards = [{"title": j["symbol"], "badge": {"text": f"P {j['p']:.0%}", "tone": "info"},
+              "sub": f"Chance of +50% one hour after being added, added at ${j['entry_mc'] / 1000:,.0f}k at {datetime.fromtimestamp(j['t_entry'] / 1000):%I:%M %p}",
+              "lines": [f"Contract {tok}"], "links": [{"label": k, "href": u} for k, u in agent.feeds.links("solana", tok).items()]} for tok, j in picks]
+    spec = {"kind": "Signal alert · +50% candidates", "status": {"text": f"{len(picks)} pick{'s' if len(picks) > 1 else ''}", "tone": "info"},
+            "title": f"{len(picks)} Coin{'s' if len(picks) > 1 else ''} With a Good Chance of +50% One Hour After Being Added: {', '.join(j['symbol'] for _, j in picks)}",
+            "subtitle": f"On held-out coins, picks at this score hit +50% {gt.get('hit') or 0:.0%} of the time (base rate {meta.get('base_rate_test') or 0:.0%}); median 1-hour multiple {gt.get('median_end_mult') or 0:.2f}x, before fees and slippage.",
+            "sections": [{"title": "Picks", "blocks": [{"type": "cards", "items": cards}]},
+                         {"title": "Read this first", "blocks": [{"type": "callout", "tone": "warn", "text": "Not advice. Most new coins go to zero, and these are not listed on Coinbase or Robinhood. results/plus50_report.md has the full numbers."}]}],
+            "footer": "Sent by the Coin Launch Agent plus50 model (~/coin-launch-agent)."}
+    if agent.send_email(f"Coin Launch Agent · +50% candidates: {', '.join(j['symbol'] for _, j in picks)}", "", spec):
         for tok, _ in picks:
             st["judged"][tok]["emailed"] = True
         save(STATE, st)

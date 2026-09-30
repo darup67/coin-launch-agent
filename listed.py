@@ -14,6 +14,7 @@ because pump.fun is full of look-alike tickers (PUMP, RAY, "NVIDIA", ...). Marke
 
   listed.py scan         score the universe, write data/listed_board.json, print the board
   listed.py venues       rebuild the venue allowlist (cached 24 h) and print its size
+  listed.py email [--test]   send this report as a designed email
   listed.py chains       which blockchains Coinbase and Robinhood support (the project only draws tokens from these)
   listed.py check ADDR   is this Solana mint / Base contract supported on Coinbase or Robinhood?
   listed.py prune-junk   one-time: back up then delete pump.fun / DEX-watcher data (nothing there can pass the venue filter)
@@ -605,6 +606,66 @@ def show(b=None, top=8):
     show_extras(b)
 
 
+# ------------------------------------------------------------------ email
+def email_spec(b):
+    """The coin detector report as a designed email (shared layout, ~/flip-notifier/email-ui.js)."""
+    c = b["thresholds"]
+    cn = b["counts"]
+    clean = [r for r in b["rows"] if r["clean"]]
+    tbl = lambda cols, rows, empty: {"type": "table", "empty": empty, "columns": cols, "rows": rows}
+    def venue(r):
+        return " + ".join(n for n, on in (("Coinbase", r["coinbase"]), ("Robinhood", r["robinhood"])) if on)
+    main_rows = [{"sym": {"v": r["symbol"], "bold": True, "href": (r["links"].get("Coinbase") or r["links"].get("Robinhood"))}, "venue": venue(r),
+                  "d24": {"v": _pct(r["ret_24h"]), "tone": "good"}, "d6": _pct(r["ret_6h"]), "up": f"{r['up_hours']:.0%}", "dip": f"{r['max_drawdown']:.1%}", "off": f"{r['off_high']:.1%}",
+                  "mc": f"${r['mcap'] / 1e6:,.0f}M" if r.get("mcap") else "n/a", "since": f"{(time.time() - r['clean_since']) / 3600:.1f}h" if r.get("clean_since") else ""} for r in clean]
+    near = [r for r in b["rows"] if (r["A"] or r["B"]) and not r["clean"]][:6]
+    near_rows = [{"sym": {"v": r["symbol"], "bold": True}, "why": "running, not holding" if r["A"] else "holding, not running", "d24": _pct(r["ret_24h"]), "dip": f"{r['max_drawdown']:.1%}", "off": f"{r['off_high']:.1%}", "score": str(r["score"])} for r in near]
+    secs = [{"blocks": [{"type": "kpis", "items": [{"label": "Pass both tests", "value": str(cn["clean"]), "tone": "good" if cn["clean"] else None, "sub": f"of {b['universe']} scored"},
+                                                  {"label": "Running only", "value": str(cn["A_only"]), "sub": "not holding yet"}, {"label": "Holding only", "value": str(cn["B_only"]), "sub": "not running"}]}]},
+            {"title": "Listed tokens rising fast and steadily, and holding", "note": "Only tokens listed on Coinbase or Robinhood on a supported blockchain are shown. Symbol links open the exchange page.",
+             "blocks": [tbl([{"key": "sym", "label": "Token"}, {"key": "venue", "label": "Listed on"}, {"key": "d24", "label": "24h", "align": "right"}, {"key": "d6", "label": "6h", "align": "right"},
+                             {"key": "up", "label": "Up-hours", "align": "right"}, {"key": "dip", "label": "Worst dip", "align": "right"}, {"key": "off", "label": "Off high", "align": "right"},
+                             {"key": "mc", "label": "Market cap", "align": "right"}, {"key": "since", "label": "Clean for", "align": "right"}], main_rows, "Nothing passes both tests right now.")]}]
+    if not clean and near_rows:
+        secs.append({"title": "Closest to passing", "blocks": [tbl([{"key": "sym", "label": "Token"}, {"key": "why", "label": "Status"}, {"key": "d24", "label": "24h", "align": "right"}, {"key": "dip", "label": "Worst dip", "align": "right"},
+                                                                  {"key": "off", "label": "Off high", "align": "right"}, {"key": "score", "label": "Score", "align": "right"}], near_rows, "")]})
+    w = b.get("watcher")
+    if w is not None:
+        secs.append({"title": "Original coin watcher (unchanged parameters)", "blocks": [{"type": "para", "text": f"Tracking {w['tracked']} new Solana and Base tokens and {w['hits']} hits so far. {len(w['listed_hits']) + len(w['listed_tracked'])} of them are listed on Coinbase or Robinhood (matched by contract address)."}]})
+    ls = sorted(b.get("listings") or [], key=lambda e: -e["t"])[:8]
+    secs.append({"title": "New listings and listing signals (last 14 days)", "blocks": [tbl([{"key": "sym", "label": "Token"}, {"key": "what", "label": "What happened"}, {"key": "when", "label": "When"}, {"key": "o", "label": "Origin"}],
+        [{"sym": {"v": e["symbol"], "bold": True}, "what": e["label"], "when": _ago(e["t"]), "o": ", ".join(x for x in (("launched on pump.fun" if (e.get("origin") or {}).get("pump_fun") else ""),
+            (f"token {e['origin']['age_days']}d old" if (e.get("origin") or {}).get("age_days") is not None else ""), ("was a watcher hit" if e.get("watcher_hit") else "")) if x)} for e in ls], "None yet.")]})
+    rd = b.get("radar")
+    if rd and rd.get("rows") is not None:
+        rows = rd["rows"]
+        rr = [{"sym": {"v": r["symbol"], "bold": True, "href": r["links"].get("DexScreener")}, "tag": {"v": "A+B" if r["clean"] else "A" if r["A"] else "B" if r["B"] else "none", "tone": "good" if r["clean"] else "neutral"},
+               "d24": _pct(r["ret_24h"]), "dip": f"{r['max_drawdown']:.1%}", "mc": f"${r['mcap'] / 1e6:,.0f}M", "age": f"{r['age_days']}d",
+               "on": ", ".join(r["other_exchanges"]) or ("none found" if r["cg_verified"] else "unverified")} for r in ((rd["rows"] and [x for x in rows if x["clean"]]) or rows)[:6]]
+        secs.append({"title": "Radar: unlisted tokens that could be listed later", "note": f"{rd['candidates']} heavy-volume Solana and Base tokens screened. NOT on Coinbase or Robinhood today, so not buyable there. Kept separate from the list above.",
+                     "blocks": [tbl([{"key": "sym", "label": "Token"}, {"key": "tag", "label": "Tests"}, {"key": "d24", "label": "24h", "align": "right"}, {"key": "dip", "label": "Worst dip", "align": "right"},
+                                     {"key": "mc", "label": "Market cap", "align": "right"}, {"key": "age", "label": "Age", "align": "right"}, {"key": "on", "label": "Also on"}], rr, "Nothing screened.")]})
+    secs.append({"title": "How the tests work", "blocks": [{"type": "list", "items": [
+        f"Rising fast: +{c['fast_gain_6h']:.0%} in 6 hours or +{c['fast_gain_24h']:.0%} in 24 hours. Steady: up in at least {c['min_up_hours']:.0%} of hours, a near-straight rising line (R² at least {c['min_r2']}), and no single hour above {c['max_spike_share']:.0%} of the gain.",
+        f"Holding: the worst dip in the last {c['hold_hours']} hours is at most {c['max_drawdown']:.0%} and the price is within {c['max_off_high']:.0%} of its 24-hour high.",
+        "Market cap moves are read as price moves (supply assumed fixed). The tests describe price behavior only and are not a recommendation."]}]})
+    ch = b.get("chains", {})
+    return {"kind": "Report · Coin detector", "status": {"text": f"{cn['clean']} pass", "tone": "good" if cn["clean"] else "neutral"},
+            "title": "Coin Detector: Coinbase and Robinhood Tokens Rising Fast and Steadily, and Holding",
+            "subtitle": f"{time.strftime('%A %b %-d, %-I:%M %p')} · {b['universe']} listed tokens scored on {ch.get('allowed', '?')} supported blockchains",
+            "sections": secs, "footer": "Sent by the Coin Launch Agent (~/coin-launch-agent, listed.py)."}
+
+
+def send_report(test=False):
+    sys.path.insert(0, os.path.expanduser("~/flip-notifier"))
+    import email_ui
+    b = load(BOARD, None)
+    if not b:
+        return False
+    n = b["counts"]["clean"]
+    return email_ui.send(("[TEST] " if test else "") + f"Coin Launch Agent · Coin detector report: {n} token{'s' if n != 1 else ''} pass both tests", email_spec(b))
+
+
 # ------------------------------------------------------------------ junk pruning
 JUNK = ["data/pre", "data/pump", "data/dataset.parquet", "data/plus50.json", "data/plus50_state.json", "data/live.json", "data/tracked.json",
         "data/scores.json", "data/train.log", "data/alert.txt", "models/plus50", "models/plus50_meta.json", "models/pre_meta.json", "results"]
@@ -632,6 +693,8 @@ if __name__ == "__main__":
     elif a[0] == "venues":
         v = venues(refresh=True)
         print(f"Coinbase online spot assets {len(v['coinbase'])} · Robinhood {len(v['robinhood'])} · on-chain addresses {len(v['addr'])}")
+    elif a[0] == "email":
+        print("sent" if send_report(test="--test" in a) else "FAILED")
     elif a[0] == "chains":
         v = venues(refresh="--refresh" in a)
         print("Coinbase supported networks (assets on each):", dict(sorted(v["coinbase_networks"].items(), key=lambda kv: -kv[1])))

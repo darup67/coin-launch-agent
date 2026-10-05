@@ -816,7 +816,7 @@ def backup():
     git = ["/usr/local/bin/git", "-C", here]
     subprocess.run(git + ["add", "archive"], capture_output=True)
     if subprocess.run(git + ["diff", "--cached", "--quiet", "--", "archive"]).returncode:
-        msg = "candle archive: %d new day(s)\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" % r["archived_days"]
+        msg = "candle archive: %d new day(s)" % r["archived_days"]
         subprocess.run(git + ["commit", "-q", "-m", msg, "--", "archive"], capture_output=True)
         p = subprocess.run(git + ["push", "-q"], capture_output=True, text=True)
         r["pushed"] = p.returncode == 0
